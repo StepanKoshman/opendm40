@@ -5,7 +5,33 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.13-sk1 (2026-11-03)
+
+Replaces v0.4.12-sk1, which froze after being installed on a meter and then
+restarted. A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40);
+not an official opendm40 release.
+
+### Fixed
+
+- **The freeze after installing v0.4.12-sk1, then a restart.** This build is
+  the code that ran on the meter before v0.4.12-sk1's last changes (the size
+  work called region B audit #11: the linker's merging of identical functions,
+  a second outliner pass, the CRC table, functions moved out of line). Those
+  changes are taken out; the cause inside them was not found. The features
+  are those of v0.4.12-sk1 below, nothing else is new. Region B has the 14.1 KB
+  free it had before that work.
+
+### Кратко по-русски
+
+- Заменяет v0.4.12-sk1: после установки она зависала и перезагружалась. Это
+  код, который работал на приборе до последних правок v0.4.12-sk1 (работа с
+  размером области B убрана, причину зависания в ней не искали). Функции те же,
+  что в v0.4.12-sk1 ниже.
+
 ## v0.4.12-sk1 (2026-11-03)
+
+**Withdrawn:** this build froze after installing and then restarted the
+meter; use v0.4.13-sk1.
 
 A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40)
 on v0.4.0: the scope's DMM channel (CH2) as a full channel, colours, the ohm
