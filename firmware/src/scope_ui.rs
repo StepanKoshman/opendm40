@@ -3092,8 +3092,6 @@ pub struct PopVals {
     pub ch2_vdiv: Txt,
     /// MF > Measure: the next picked item measures CH2 (the Source cell).
     pub meas_src2: bool,
-    /// CH1 > Coupling: this range's zero ("-1.49mV", "--" none).
-    pub zero_txt: Txt,
 }
 
 /// Which popup is open (tab).
@@ -3588,14 +3586,7 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
     side_popup("CH1", &["Coupling", "Probe", "Color"], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
-        0 => {
-            option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize);
-            // opendm40: the user zero of this range (input shorted, DC).
-            fill_text(ZERO_LABEL, pc, C_POP_BG, sf::SC_F16, ZERO_LABEL, "Zero", C_BAR, 8, 0);
-            fill_text(ZERO_VALUE, pc, C_POP_BG, sf::SC_F16, ZERO_VALUE, v.zero_txt.as_str(), C_BAR, 8, 0);
-            rbox_text(ZERO_SET, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Set", C_WHITE);
-            rbox_text(ZERO_CLEAR, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
-        }
+        0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
         1 => {
             let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
@@ -3607,13 +3598,6 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
 }
-
-/// CH1 popup > Coupling: the zero's caption, value (this range, "--" none),
-/// Set (input shorted) and Clear (every range).
-pub const ZERO_LABEL: Rect = rect(SX + 79, 112, 120, 20);
-pub const ZERO_VALUE: Rect = rect(SX + 79, 134, 120, 20);
-pub const ZERO_SET: Rect = rect(SX + 94, 160, 90, 30);
-pub const ZERO_CLEAR: Rect = rect(SX + 94, 200, 90, 30);
 
 /// Math popup (stock layout): Mode FFT / ABS, Color, Hz/Div (four values
 /// from the current FFT span), Other (window, unit).
@@ -3646,8 +3630,6 @@ pub enum SideHit {
     Tab(u8),
     /// CH1: coupling 0 DC 1 AC.
     Coupling(u8),
-    /// CH1 > Coupling: Zero Set (true) / Clear (false).
-    Zero(bool),
     Probe(u8),
     Colour(u8),
     /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
@@ -3686,16 +3668,7 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
         };
     }
     match tab {
-        0 => {
-            let near = |r: Rect| rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y);
-            if near(ZERO_SET) {
-                SideHit::Zero(true)
-            } else if near(ZERO_CLEAR) {
-                SideHit::Zero(false)
-            } else {
-                option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling)
-            }
-        }
+        0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
         1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
         _ => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }

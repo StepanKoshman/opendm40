@@ -1329,14 +1329,7 @@ in the left or right half of the graph steps), **Off**.
 - **Drag up or down** in the graph to move the trace (or the item you
   selected; see [Moving things with a finger](#moving-things-with-a-finger)).
 - Tap the **CH1** title for the channel popup:
-  - **Coupling**: DC or AC; and **Zero**, the offset correction of the
-    current V/div: short the input (probe tip to its ground), DC, RUN, tap
-    **Set**. The meter measures the mean (Vavg) and takes it off every
-    reading on that V/div range (the trace, measurements, cursors, trigger
-    level, CSV, SCPI); the popup shows the offset taken off, for example
-    **-1.49mV**. Each hardware range has its own (repeat on the V/div you
-    use); **Clear** removes them all. Kept in the settings; the factory
-    calibration is not changed.
+  - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
   - **Color** of the trace.

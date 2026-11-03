@@ -2356,16 +2356,6 @@ impl App {
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
             meas_src2: self.meas_src2,
-            zero_txt: {
-                let z = self.scope.zero_volts();
-                let mut b = su::Buf::new();
-                if z == 0.0 {
-                    b.push("--");
-                } else {
-                    su::fmt_v(&mut b, z, "V");
-                }
-                su::Txt::new(b.as_str())
-            },
         }
     }
 
@@ -2771,20 +2761,6 @@ impl App {
                 st.ac = c == 1;
                 self.scope_set(st, now);
             }
-            su::SideHit::Zero(set) => {
-                if !set {
-                    self.scope.zero_clear();
-                    self.toast(now, "Zero cleared", true);
-                } else if self.scope.s.ac {
-                    self.toast(now, "Zero: DC coupling", false);
-                } else if !self.scope.s.run || !self.scope.zero_set(self.meas_res.v[19]) {
-                    self.toast(now, "Zero: short the input, RUN", false);
-                } else {
-                    self.toast(now, "Zero set for this V/div", true);
-                }
-                self.sp_settings_changed();
-                self.scope.refresh();
-            }
             su::SideHit::Probe(i) => {
                 st.probe = scope::PROBES[(i as usize).min(12)];
                 self.scope_set(st, now);
@@ -3079,12 +3055,6 @@ impl App {
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
         p[5] = self.ch2.pos as u16 as u32;
-        // [5] bits 16..31, [6], [7]: the CH1 zero per hardware range (i8
-        // quarter codes, Scope::zero_bytes; 0 = none).
-        let z = self.scope.zero_bytes();
-        p[5] |= (z[0] as u32) << 16 | (z[1] as u32) << 24;
-        p[6] = u32::from_le_bytes([z[2], z[3], z[4], z[5]]);
-        p[7] = u32::from_le_bytes([z[6], z[7], z[8], z[9]]);
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3113,8 +3083,6 @@ impl App {
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
-        let (a, b) = (p[6].to_le_bytes(), p[7].to_le_bytes());
-        self.scope.set_zero_bytes([(p[5] >> 16) as u8, (p[5] >> 24) as u8, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]]);
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
