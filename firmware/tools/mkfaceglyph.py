@@ -210,7 +210,10 @@ def glyph_in_face(face, sc, line_h, descent, four, cls, text, gw, gh, adv, yoff,
     px, dy = sc
     line_top, line_bot = -(line_h - descent), descent
     a = unpack(data, gw, gh, four)
-    cols = ink_cols(a)
+    # The stock ink's solid columns (coverage >= 1/4): its faint AA edge
+    # columns stay gaps, where the face's denser edges would make two
+    # neighbours touch (ui-render's glyph-gap check).
+    cols = ink_cols(a >= 4) or ink_cols(a)
     if cols is None:
         return None
     sw = cols[1] - cols[0]
