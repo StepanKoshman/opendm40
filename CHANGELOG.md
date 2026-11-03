@@ -5,6 +5,44 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.16-S2084 (2026-11-04)
+
+On v0.4.15-S2084 (the code that ran on the meter): the scope's current unit
+and the DMM channel's unit. A build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release.
+
+### New
+
+- **CH1 type Vol / Cur** (CH1 popup > **Probe** > **Type**, back as in the
+  stock). **Cur** shows CH1 in amperes: the V/div, the trigger level badge,
+  the measurements (Ip-p, ...), the cursors, the math scale and the CSV
+  (`time_s,amperes`). The probe factor then means amperes per volt at the
+  input (x10 reads a 100 mV/A clamp). Kept over a restart.
+- **CH2 (DMM) unit V / A** (MF > **Display**, beside **On** / **Off**). A tap
+  puts the multimeter into that function: V, or AC A (DC-coupled, what CH2
+  can stream); AC+DC and AUTO, which CH2 cannot stream, become DC (V) or AC
+  (A), and the power meter is left. The trace restarts on the new row at once.
+  There are no watts here: the power meter measures P from two inputs one
+  after the other, so there is no waveform of P on one input.
+
+### Fixed
+
+- **The T marker at the top** (the trigger position) takes the colour of the
+  trigger source (CH1, DMM / CH2, GEN) like the level marker, its line and the
+  badge; it was always CH1's colour.
+
+### Кратко по-русски
+
+- **CH1: Type Vol / Cur** (окно CH1 > Probe > Type, как в стоке): в режиме
+  **Cur** CH1 показан в амперах (V/div, уровень синхронизации, измерения,
+  курсоры, CSV). Множитель щупа тогда означает амперы на вольт на входе.
+- **Канал DMM (CH2): единица V / A** (MF > Display рядом с On / Off): касание
+  переключает и мультиметр (V или AC A). Ватт нет: ваттметр считает мощность
+  по очереди на двух входах, формы сигнала мощности на одном входе нет.
+- **Метка T сверху** (положение синхронизации) теперь цвета источника
+  синхронизации (CH1, DMM, GEN), как метка уровня; была всегда цвета CH1.
+
 ## v0.4.15-S2084 (2026-11-03)
 
 Replaces v0.4.12-sk1, which froze after being installed on a meter and then

@@ -557,10 +557,11 @@ impl Model {
         if self.wvdiv > 0.0 {
             fmt_div(out, self.wvdiv, self.unit());
         } else {
-            vdiv_text(out, self.vdiv);
+            vdiv_text(out, self.vdiv, self.unit());
         }
     }
-    /// Unit of the vertical values ("V", source DMM current rows "A").
+    /// Unit of the vertical values ("V"; "A": the DMM current rows, CH1
+    /// type Cur).
     pub fn unit(&self) -> &'static str {
         if self.amps { "A" } else { "V" }
     }
@@ -671,9 +672,9 @@ pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
     out.push(crate::dmm::format(&mut t, v, frac as u8)).push(P[i]).push(unit);
 }
 
-/// "1V", "200mV": the V/div label and unit.
-pub fn vdiv_text(out: &mut Buf, vdiv: u8) {
-    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push("V");
+/// "1V", "200mV": the V/div label and `unit` ("V" / "A").
+pub fn vdiv_text(out: &mut Buf, vdiv: u8, unit: &str) {
+    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push(unit);
 }
 
 // ------------------------------------------------------------------ widgets
@@ -1546,7 +1547,10 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
 fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
-    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    // The trigger position's T in the trigger source's colour (CH1: the
+    // trace palette, as stock; CH2 / GEN: theirs), like the level marker.
+    let tc = if m.tsrc == crate::scope::TSRC_CH1 { m.pal() } else { trig_colour(m) };
+    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, tc);
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
@@ -3171,10 +3175,15 @@ pub struct PopVals {
     /// docs/scope-gen-channel.md).
     pub tsrc: u8,
     pub gen_trace: bool,
+    /// CH1 type Cur (CH1 popup, Probe tab): the values in amperes.
+    pub cur: bool,
     /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// The multimeter's function as CH2's unit: 0 V, 1 A, 2 another one
+    /// (neither shown selected).
+    pub ch2_func: u8,
     /// MF > Measure: the next picked item measures CH2 (the Source cell).
     pub meas_src2: bool,
 }
@@ -3416,6 +3425,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             cb.push("Color: ").push(CH2_COLOUR_NAMES[ch2_colour_idx() as usize % (NPAL + 1)]);
             rbox_text(C2_COLOUR, pc, 8, c_ch2(), C_POP_BG, sf::SC_F16, cb.as_str(), c_ch2_ink());
             option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            option_list(C2_UNIT, pc, &["V", "A"], 44, v.ch2_func as usize);
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                 rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3445,7 +3455,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 crate::trigsoft::RUNT => {
                     fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "2nd level:", C_FILL, 1, 0);
                     let mut b = Buf::new();
-                    fmt_v(&mut b, v.runt_v, "V");
+                    fmt_v(&mut b, v.runt_v, if v.cur { "A" } else { "V" });
                     fill_text(TP_COND, pc, C_POP_BG, sf::SC_F16, TP_COND, b.as_str(), C_ORANGE, 1, 0);
                     fill_text(TR_HINT, pc, C_POP_BG, sf::SC_F16, TR_HINT, "drag orange T", C_FILL, 1, 0);
                 }
@@ -3489,6 +3499,9 @@ pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
 pub const C2_LIST: Rect = rect(24, 233, 88, 24);
+/// MF > Display: CH2's unit V / A (the multimeter's function), right of
+/// its On / Off.
+pub const C2_UNIT: Rect = rect(120, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
@@ -3549,6 +3562,8 @@ pub enum MfHit {
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
+    /// MF > Display: CH2's unit, true = A (the multimeter follows).
+    Ch2Func(bool),
     /// MF > Display: the next CH2 colour.
     Ch2Colour,
     /// MF > Display: the next GEN trace colour.
@@ -3611,6 +3626,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::GenTrace(i == 0)
             } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
                 MfHit::Ch2(i == 0)
+            } else if let Some(i) = option_hit(C2_UNIT, 2, 44, x, y) {
+                MfHit::Ch2Func(i == 1)
             } else if v.ch2_on && near(C2_MINUS) {
                 MfHit::Ch2Step(false)
             } else if v.ch2_on && near(C2_PLUS) {
@@ -3695,10 +3712,12 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         1 => {
             let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
-            // Stock also shows "Type Vol / Cur" here; it changes nothing
-            // (opendm40 reads the Wave view's current from the DMM), so it
-            // is left out.
             spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            // Stock's "Type Vol / Cur" (owner 2026-11-04): Cur shows CH1's
+            // values in amperes (the probe scale: A per volt at the input).
+            let r = rect(SX + 79, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Type", C_BAR, 8, 0);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &["Vol", "Cur"], 44, v.cur as usize);
         }
         _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
@@ -3736,6 +3755,8 @@ pub enum SideHit {
     /// CH1: coupling 0 DC 1 AC.
     Coupling(u8),
     Probe(u8),
+    /// CH1: type 0 Vol 1 Cur.
+    Type(u8),
     Colour(u8),
     /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
     /// (1 = Vrms).
@@ -3774,7 +3795,10 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
     }
     match tab {
         0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        1 => match spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y) {
+            Some(i) => SideHit::Probe(i),
+            None => option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Type),
+        },
         _ => spinner_hit(rect(SX + 84, 70, 110, 150), NPAL, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }

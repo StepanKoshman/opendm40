@@ -719,6 +719,43 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 save(out, name);
             }
         }
+        // CH1 type Cur (owner 2026-11-04): the Probe tab's Type list, the
+        // unit on CH1's V/div, the taps on the Type list and CH2's V / A.
+        if !combined {
+            let mut pc = pv;
+            pc.cur = true;
+            let mut mc = m;
+            mc.amps = true;
+            draw(&mc, scope_ui::Popup::Ch1(1), &pc, true);
+            ck.check_replica("gen/ch1-cur");
+            save(out, "s08-ch1-cur");
+            let sc = scope_ui::block_look(&mc, scope_ui::BLK_CH1).scale;
+            let sv = scope_ui::block_look(&m, scope_ui::BLK_CH1).scale;
+            println!("CH1 scale: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str());
+            if !(sc.as_str().ends_with('A') && sv.as_str().ends_with('V')) {
+                ck.fail("gen/ch1-cur", format!("CH1 scale unit: Vol {:?}, Cur {:?}", sv.as_str(), sc.as_str()));
+            }
+            let sx = scope_ui::PANEL_X - 200;
+            let ty = |i: i16| scope_ui::side_hit(false, 1, &pc, sx + 94 + 22 + 44 * i, 262);
+            if !(matches!(ty(0), scope_ui::SideHit::Type(0)) && matches!(ty(1), scope_ui::SideHit::Type(1))) {
+                ck.fail("gen/ch1-cur", "the CH1 Probe tab's Type list is not hit".to_string());
+            }
+            if !matches!(scope_ui::side_hit(false, 1, &pc, sx + 94, 120), scope_ui::SideHit::Probe(_)) {
+                ck.fail("gen/ch1-cur", "the Probe spinner lost its hit".to_string());
+            }
+            let uy = |i: i16| scope_ui::mf_hit(1, &pv, scope_ui::C2_UNIT.x + 22 + 44 * i, scope_ui::C2_UNIT.y + 12);
+            if !(matches!(uy(0), scope_ui::MfHit::Ch2Func(false)) && matches!(uy(1), scope_ui::MfHit::Ch2Func(true))) {
+                ck.fail("gen/ch2-func", "the Display tab's CH2 V / A is not hit".to_string());
+            }
+            // CH2's On / Off and V / A side by side: neither takes the other's taps.
+            if !matches!(scope_ui::mf_hit(1, &pv, scope_ui::C2_LIST.x + 22, scope_ui::C2_LIST.y + 12), scope_ui::MfHit::Ch2(true)) {
+                ck.fail("gen/ch2-func", "CH2 On lost its hit".to_string());
+            }
+            let mut pa = pv;
+            pa.ch2_func = 1;
+            draw(&m, scope_ui::Popup::Mf(1), &pa, true);
+            save(out, "s08-ch2-func-a");
+        }
         // CH2 measurements: Source CH2 in the Measure tab, two CH2 items
         // picked (magenta), and their cells under the graph.
         if !combined {
@@ -747,6 +784,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let mut mt = m;
             mt.tsrc = scope::TSRC_CH2;
             mt.trig_row = 90;
+            mt.trig_px = 200;
             mt.sel_v = 1;
             mt.guide = true;
             let mut pvt = pv2;
@@ -760,9 +798,27 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let top = mt.top() as usize;
             let fy = top + scope_ui::line_fy(h, 90) as usize;
             let (badge, mark, line) = (count(352, 414, 1, 18, g), count(rx, rx + 12, top, top + h as usize, g), count(20, 300, fy, fy + 1, g));
-            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px");
-            if !(badge > 20 && mark > 20 && line > 40) {
-                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
+            // The trigger position's T at the top (graph column 200, DOWN
+            // glyph from x GX + 195): in the trigger source's colour too.
+            let tx = (scope_ui::GX + 1 + 200 - 6) as usize;
+            let tpos = count(tx, tx + 12, top, top + 14, g);
+            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px");
+            if !(badge > 20 && mark > 20 && line > 40 && tpos > 20) {
+                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px"));
+            }
+            // GEN as the trigger source: the T position in the GEN colour,
+            // not CH2's or CH1's.
+            let mut mg = mt;
+            mg.tsrc = scope::TSRC_GEN;
+            let mut pvg = pvt;
+            pvg.tsrc = scope::TSRC_GEN;
+            draw(&mg, scope_ui::Popup::None, &pvg, true);
+            ck.check_replica("gen/gen-trigger");
+            let gg = scope_ui::c_gen();
+            let tgen = count(tx, tx + 12, top, top + 14, gg);
+            println!("GEN trigger in GEN's colour: T position {tgen} px");
+            if tgen <= 20 {
+                ck.fail("gen/gen-trigger", format!("GEN trigger's T position not in GEN's colour: {tgen} px"));
             }
             // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
             // the CH1 block dimmed; CH2, GEN and the trigger stay.
