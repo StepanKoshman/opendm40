@@ -5,7 +5,7 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
-## v0.4.13-sk1 (2026-11-03)
+## v0.4.15-S2084 (2026-11-03)
 
 Replaces v0.4.12-sk1, which froze after being installed on a meter and then
 restarted. A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40);
@@ -31,7 +31,7 @@ not an official opendm40 release.
 ## v0.4.12-sk1 (2026-11-03)
 
 **Withdrawn:** this build froze after installing and then restarted the
-meter; use v0.4.13-sk1.
+meter; use v0.4.15-S2084.
 
 A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40)
 on v0.4.0: the scope's DMM channel (CH2) as a full channel, colours, the ohm

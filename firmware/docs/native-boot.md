@@ -1364,7 +1364,7 @@ only through an address.
 
 **Withdrawn the same day.** v0.4.12-sk1, which had this series in it, froze
 after being installed on a meter and then restarted; the 0.4.11-sk1 code
-(PR build 3866cd4, tested on the meter) ran. v0.4.13-sk1 is that code again,
+(PR build 3866cd4, tested on the meter) ran. v0.4.15-S2084 is that code again,
 the series is out of the tree (it stays in git: commits 5d208c6 .. 995ead3),
 and its cause was not found. The text below describes what was tried.
 
