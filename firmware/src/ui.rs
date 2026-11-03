@@ -77,10 +77,16 @@ pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
 /// Left edge of the main readout's cells in the extra-digit layout
-/// (`CELLS_X`, 8..398): 390 px do not fit in the stock 40..400, so the
+/// (`CELLS_X`, 12..402): 390 px do not fit in the stock 40..400, so the
 /// whole number starts further left, over the stock HV lightning's box
-/// (`hv_warning` draws it small in the aux row then).
-const XT_X: i16 = 8;
+/// (`hv_warning` draws it small in the aux row then). As far right as the
+/// unit and the limit badge allow (their boxes from 403 / 406; the digits'
+/// ink ends ~4 px before the cells' end): the stock-sized 5 digits end at
+/// 400, the 6 should not sit much further left.
+const XT_X: i16 = 12;
+/// Right end of the extra-digit layout's cells (and its box: it also
+/// clears the stock cells' end, 400).
+const XT_END: i16 = XT_X + 390;
 /// The aux-row box of the small HV lightning (extra-digit layout): the
 /// stock lightning at half size, its baseline just below the box.
 const HV_SMALL: sf::Rect = rect(8, 37, 20, 29);
@@ -156,7 +162,8 @@ const CELLS: [[u8; 7]; 6] = [
 /// OL): the 7 cells of the reading and the extra digit's cell, all full
 /// size. Sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78
 /// digits are <= 56 px wide): centred, every glyph keeps >= 1 px to its
-/// neighbours = 390 px: XT_X..398, >= 5 px before the limit badge (403).
+/// neighbours = 390 px: XT_X..XT_END (402), the ink >= 5 px before the
+/// limit badge (403).
 /// The layout holds whenever the extra digit can appear (`DmmView::ext_slot`),
 /// with or without it, so the digit only fills or empties the last cell.
 const CELLS_X: [[u8; 8]; 4] = [
@@ -318,7 +325,11 @@ pub struct DmmView {
     pub pwc: pw::PwCache,
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
-    /// Test current label as last drawn: ohm range | variant << 3, 0x10
+    /// The ohm null is on (Dmm::ohm_null; set by the app before
+    /// `draw_static`): "NULL" after the ohm test current.
+    pub ohm_null: bool,
+    /// Test current label as last drawn: ohm range | variant << 3 | null <<
+    /// 6, 0x10
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
@@ -630,6 +641,7 @@ impl DmmView {
             power: false,
             pwc: pw::PwCache::new(),
             ohm_on: false,
+            ohm_null: false,
             last_iohm: 254,
             ol_word: false,
             acc: Some(Acc { model: 2, tc: true }),
@@ -893,16 +905,18 @@ impl DmmView {
             _ => 3,
         };
         let mkey = r.mode | (r.cpl_auto as u8) << 4 | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
-        // Extra-digit layout: CELLS_X from XT_X (8..398), the digit in the
-        // last cell at full size; its box runs to 400 so a full draw clears
-        // the stock cells' end (40..400). Leaving it, the stock cells start
-        // at 40: the strip 8..40 is cleared (the HV lightning's box, which
-        // the app redraws with the layout change, `hv_warning`).
-        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, 400 - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
+        // Extra-digit layout: CELLS_X from XT_X (12..402), the digit in the
+        // last cell at full size; its box runs past 400 so a full draw
+        // clears the stock cells' end (40..400). Leaving it, the stock cells
+        // start at 40 and end at 400: the strips 12..40 (the HV lightning's
+        // box, which the app redraws with the layout change, `hv_warning`)
+        // and 400..402 are cleared.
+        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, XT_END - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
         if last_slot && !slot {
             lcd::fill_rect(XT_X as u16, (68 + md) as u16, (40 - XT_X) as u16, 80, BG);
+            lcd::fill_rect(400, (68 + md) as u16, (XT_END - 400) as u16, 80, BG);
         }
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
@@ -991,7 +1005,7 @@ impl DmmView {
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
             _ if band => 255,
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6,
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
@@ -1141,7 +1155,7 @@ impl DmmView {
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
         } else if ik != 255 && self.last_iohm != ik {
-            test_current_label(r.mode, r.range, self.ohm_on);
+            test_current_label(r.mode, r.range, self.ohm_on, self.ohm_null);
             self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
@@ -1243,9 +1257,10 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
 /// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
-/// property of the function, not a reading).
+/// property of the function, not a reading). `null`: the ohm null is on
+/// (r0..r6): "NULL" after it, in the reading's colour.
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
-fn test_current_label(mode: u8, range: i8, on: bool) {
+fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
@@ -1268,6 +1283,10 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
+    if null && mode == 10 && !exp {
+        let w = sf::text_width(sf::F14, t.as_str(), 1);
+        sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
+    }
 }
 
 /// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
@@ -1638,6 +1657,28 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     }
 }
 
+/// "Null" on the Resistor Settings page (Dmm::ohm_null): the note row's
+/// right half, beside the 600 Mohm item (`range_rect(8)`, 8..236). Selected
+/// colour while on, with the value.
+pub const NULL_BTN: sf::Rect = rect(244, 141, 228, 36);
+
+/// The Null button (`NULL_BTN`) for a null of `ohm` (0 = off).
+#[inline(never)] // .cold (link-native.x): the MF page, drawn on a tap
+pub fn ohm_null_button(ohm: f32) {
+    let mut t = crate::scope_ui::Txt::new("Null ");
+    let c = if ohm > 0.0 {
+        let mut b = [0u8; 16];
+        t.push(crate::dmm::format(&mut b, ohm, 3));
+        t.push(" \u{3a9}");
+        SEL
+    } else {
+        t.push("off");
+        0x2966
+    };
+    sf::rbox(NULL_BTN, 6, c, BG);
+    sf::glyphs(sf::TEXT22, NULL_BTN, t.as_str(), STATUS_FG, c, 8, 0);
+}
+
 /// "Inrush" on the Current Settings page (the inrush capture, app_inrush.rs;
 /// builds with the AD2 stream ISR only): the note row, right column (the
 /// AC+DC column of the stock grid), beside Fuse check.
@@ -1823,7 +1864,7 @@ fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons, while `ohm_vars_shown(sel)`.
+/// buttons, while `ohm_vars_shown(sel)`, Err(8) = Null (`NULL_BTN`).
 pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
@@ -1847,6 +1888,9 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         Some(1) => return Some(Err(7)),
         Some(3) => return Some(Err(2)),
         _ => {}
+    }
+    if (139..180).contains(&y) && x >= 241 && b == Button::Ohm {
+        return Some(Err(8));
     }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
@@ -2269,7 +2313,7 @@ pub fn rate_chip_hit(x: u16, y: u16) -> bool {
 }
 
 /// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
-/// in the extra-digit layout 8..398; 4 px around): resolution / rate step
+/// in the extra-digit layout 12..402; 4 px around): resolution / rate step
 /// (App). The power meter's parts layout: down to its P sub-line (..168).
 pub fn value_hit(x: u16, y: u16) -> bool {
     let y1 = if pw_parts() { 168 } else { 151 };

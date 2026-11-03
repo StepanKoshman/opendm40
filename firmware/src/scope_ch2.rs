@@ -153,6 +153,8 @@ impl Store {
 
     /// Sample index (fractional) at DWT time `t`; None before the oldest
     /// anchor still in the store (or no anchor yet).
+    // Not inlined: its soft-float f64 maths once (range, crossing).
+    #[inline(never)]
     fn index_at(&self, t: u32) -> Option<f64> {
         let n = self.nanc.min(NANCH);
         if n == 0 {
@@ -211,6 +213,97 @@ impl Store {
         let ia = a as u64;
         let ib = (b as u64).max(ia + 1).min(self.tot);
         Some((ia, ib))
+    }
+
+    /// The stream's rate (samples/s) from its nominal period.
+    pub fn fs(&self) -> f32 {
+        crate::clock::HCLK_HZ as f32 / self.period
+    }
+
+    /// DWT time of stored sample `j` (its anchor segment, linear between
+    /// anchors; after the newest anchor its segment's slope): None outside
+    /// the store.
+    #[inline(never)]
+    fn time_of(&self, j: u64) -> Option<u32> {
+        let n = self.nanc.min(NANCH);
+        let oldest = self.tot.saturating_sub(CAP as u64);
+        if n == 0 || j < oldest || j >= self.tot {
+            return None;
+        }
+        // f32 within a segment (at most a few thousand samples from its
+        // anchor: ~1e-7 of the offset, under a cycle per us).
+        let per = |a: (u64, u32), b: (u64, u32)| {
+            let dt = b.1.wrapping_sub(a.1) as i32;
+            if b.0 > a.0 && dt > 0 { dt as f32 / (b.0 - a.0) as u32 as f32 } else { self.period }
+        };
+        let (mut hi_i, mut hi_t) = self.anc_k(0);
+        if j >= hi_i {
+            let p = if n >= 2 { per(self.anc_k(1), (hi_i, hi_t)) } else { self.period };
+            return Some(hi_t.wrapping_add(((j - hi_i) as u32 as f32 * p) as u32));
+        }
+        for k in 1..n {
+            let (lo_i, lo_t) = self.anc_k(k);
+            if lo_i < oldest {
+                return None;
+            }
+            if j >= lo_i {
+                let p = per((lo_i, lo_t), (hi_i, hi_t));
+                return Some(lo_t.wrapping_add(((j - lo_i) as u32 as f32 * p) as u32));
+            }
+            (hi_i, hi_t) = (lo_i, lo_t);
+        }
+        None
+    }
+
+    /// Trigger on CH2 (scope.rs `ch2_next`): the first stored sample taken
+    /// in DWT [t0, t1) where the signal crosses `level` (SI) in the edge's
+    /// direction (the sample before it on the other side), and the DWT time
+    /// up to which the store has been searched (the newest sample's when
+    /// it ends before t1: the rest is searched once it is in).
+    #[inline(never)]
+    pub fn crossing(&self, t0: u32, t1: u32, level: f32, rising: bool) -> (Option<u32>, u32) {
+        if self.tot == 0 || self.nanc == 0 {
+            return (None, t0);
+        }
+        let oldest = self.tot.saturating_sub(CAP as u64);
+        let a = match self.index_at(t0) {
+            Some(a) => (a.max(oldest as f64) as u64).max(oldest),
+            None => oldest,
+        };
+        let b = self.index_at(t1).map_or(self.tot, |b| (b.max(0.0) as u64).min(self.tot));
+        let mut prev: Option<f32> = None;
+        for j in a..b {
+            let v = self.si(self.codes[(j % CAP as u64) as usize]);
+            if let Some(p) = prev {
+                let hit = if rising { p < level && v >= level } else { p > level && v <= level };
+                if hit {
+                    if let Some(t) = self.time_of(j) {
+                        return (Some(t), t);
+                    }
+                }
+            }
+            prev = Some(v);
+        }
+        let end = if b >= self.tot { self.time_of(self.tot - 1).map_or(t0, |t| t) } else { t1 };
+        (None, end)
+    }
+
+    /// The samples [ia, ib) as a measurement source (`scope_meas::
+    /// compute_codes`): codes re-quantized to 1..=1022 over their min..max
+    /// (inside the 10-bit histogram, never "clipped"), with the SI of code
+    /// 0 and of one code step. A flat run is all code 1.
+    pub fn meas_src(&self, ia: u64, ib: u64) -> (MeasSrc<'_>, f32, f32) {
+        let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        for n in ia..ib {
+            let c = self.codes[(n % CAP as u64) as usize];
+            lo = lo.min(c);
+            hi = hi.max(c);
+        }
+        let span = (hi as i32 - lo as i32).max(0);
+        let (s_lo, s_hi) = (self.si(lo), self.si(hi));
+        let v_k = if span > 0 { (s_hi - s_lo) / MEAS_SPAN as f32 } else { 0.0 };
+        let src = MeasSrc { st: self, ia, n: (ib - ia) as usize, lo, span };
+        (src, s_lo - v_k, v_k)
     }
 
     fn min_max(&self, ia: u64, ib: u64) -> (f32, f32) {
@@ -301,6 +394,37 @@ impl Store {
         let ia = base + fa as u32 as u64;
         let ib = (base + fb as u32 as u64).max(ia + 1).min(self.tot);
         Some((ia, ib))
+    }
+}
+
+/// Code steps of `Store::meas_src` between the run's min (code 1) and max
+/// (code 1022).
+const MEAS_SPAN: i32 = 1021;
+
+/// A run of stored samples re-quantized for the scope measurements
+/// (`Store::meas_src`; its `pack10::Src` is in app_ch2.rs).
+pub struct MeasSrc<'a> {
+    st: &'a Store,
+    ia: u64,
+    n: usize,
+    lo: i16,
+    span: i32,
+}
+
+impl MeasSrc<'_> {
+    /// Samples in the run.
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    /// The re-quantized code of sample `i` (1..=1022).
+    #[inline]
+    pub fn code(&self, i: usize) -> u16 {
+        if self.span <= 0 {
+            return 1;
+        }
+        let c = self.st.codes[((self.ia + i as u64) % CAP as u64) as usize];
+        (1 + (c as i32 - self.lo as i32) * MEAS_SPAN / self.span) as u16
     }
 }
 

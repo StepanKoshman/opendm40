@@ -98,6 +98,9 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// DMM page trend chart: two taps on the plot within this time are a double
+/// tap (bargraph <-> history row).
+const CHART_DOUBLE_MS: u64 = 400;
 /// The beeper indicator stays this long after the beeper's condition last
 /// held (`App::beep_ind`): its shortest on-time, and a contact that
 /// chatters faster reads as one indication.
@@ -306,9 +309,15 @@ pub struct App {
     /// setting; the relay can flip on a mechanical shock).
     anti_drop: bool,
     relay_next: u64,
+    /// Scope measurement items: stock ids, `scope_meas::CH2` set for the
+    /// DMM channel's.
     meas_sel: [u8; 4],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
+    /// The DMM channel's results (CH2), by stock id as `meas_res`.
+    pub meas_res2: crate::scope_meas::Results,
+    /// MF > Measure: the channel the next picked item measures (true: CH2).
+    meas_src2: bool,
     roll: bool,
     /// Stock-replica scope page state (scope_page.rs), incl. AUTO-set.
     sp: scope_page::Sp,
@@ -390,6 +399,9 @@ pub struct App {
     chart: [f32; ui::CHART_W as usize],
     chart_n: usize,
     chart_rate: u8,
+    /// The time of the last tap on the trend chart's plot, for a double tap
+    /// (`CHART_DOUBLE_MS`); 0 = none.
+    chart_tap: u64,
     chart_next: u64,
     chart_unit: &'static str,
     chart_dec: u8,
@@ -699,6 +711,8 @@ impl App {
             meas_sel: crate::scope_meas::DEFAULT_SEL,
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
+            meas_res2: crate::scope_meas::Results { v: [f32::NAN; 20] },
+            meas_src2: false,
             roll: true,
             sp: scope_page::Sp::new(),
             wave_req: None,
@@ -748,6 +762,7 @@ impl App {
             chart: [0.0; ui::CHART_W as usize],
             chart_n: 0,
             chart_rate: ui::TREND_DEFAULT,
+            chart_tap: 0,
             chart_next: 0,
             chart_unit: "",
             chart_dec: 0,
@@ -907,6 +922,7 @@ impl App {
     /// What a page draw takes from the app state, before drawing.
     fn draw_state(&mut self) {
         self.dmm_view.label = self.t_label();
+        self.dmm_view.ohm_null = self.dmm.ohm_null() > 0.0;
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
@@ -983,6 +999,9 @@ impl App {
                 }
                 if app_wave::WAVE_BUILD && b == Button::Amp {
                     ui::inrush_button();
+                }
+                if b == Button::Ohm {
+                    ui::ohm_null_button(self.dmm.ohm_null());
                 }
             }
             View::Settings => {
@@ -2067,22 +2086,61 @@ impl App {
         self.update_rails(clk);
     }
 
-    /// X2-1 (s), Xf (Hz), Y2-1 (V) from the cursor positions (stock formulas).
+    /// X2-1 (s), Xf (Hz), Y2-1 (V) from the cursor positions (stock
+    /// formulas); for CH2 the same times and Y2-1 at the CH2 V/div (its
+    /// trace's scale: 0 V on the centre row, `ch2_rows`).
     fn cursor_values(&mut self) {
         let sc = &self.scope.s;
         let t_px = scope::SDIV[sc.tb] / crate::scope_ui::DIV_W as f32;
         let dx = (self.cur.x[1] as f32 - self.cur.x[0] as f32) * t_px;
-        self.meas_res.v[7] = if self.cur.x_on { dx.abs() } else { f32::NAN };
-        self.meas_res.v[8] = if self.cur.x_on && dx.abs() > 0.0 { 1.0 / dx.abs() } else { f32::NAN };
-        let dy = -(self.cur.y[1] - self.cur.y[0]) as f32 * 4.0 * self.scope.vdiv() / 141.0;
-        self.meas_res.v[17] = if self.cur.y_on { dy } else { f32::NAN };
+        let x2_1 = if self.cur.x_on { dx.abs() } else { f32::NAN };
+        let xf = if self.cur.x_on && dx.abs() > 0.0 { 1.0 / dx.abs() } else { f32::NAN };
+        let rows = -(self.cur.y[1] - self.cur.y[0]) as f32 * 4.0 / 141.0;
+        self.meas_res.v[7] = x2_1;
+        self.meas_res.v[8] = xf;
+        self.meas_res.v[17] = if self.cur.y_on { rows * self.scope.vdiv() } else { f32::NAN };
+        let c2 = self.ch2.on && self.ch2.vdiv > 0.0 && !self.scope.wave_on();
+        self.meas_res2.v[7] = if c2 { x2_1 } else { f32::NAN };
+        self.meas_res2.v[8] = if c2 { xf } else { f32::NAN };
+        self.meas_res2.v[17] = if c2 && self.cur.y_on { rows * self.ch2.vdiv } else { f32::NAN };
     }
 
     fn cursors_from_selection(&mut self) {
         let sel = &self.meas_sel[..self.meas_n];
-        self.cur.x_on = sel.contains(&7) || sel.contains(&8);
-        self.cur.y_on = sel.contains(&17);
+        let has = |id: u8| sel.iter().any(|&s| crate::scope_meas::item(s) == id);
+        self.cur.x_on = has(7) || has(8);
+        self.cur.y_on = has(17);
         self.scope_invalidate();
+    }
+
+    /// Resistor Settings "Null": on, the reading now (the shorted leads,
+    /// 0 .. dmm::OHM_NULL_MAX ohm, settled, without the null) becomes the
+    /// null; on again: off. Independent of REL; kept in the settings.
+    fn ohm_null_tap(&mut self, now: u64) {
+        if self.dmm.ohm_null() > 0.0 {
+            self.dmm.set_ohm_null(0.0);
+            self.toast(now, "Null off", true);
+            return;
+        }
+        let r = self.meter.live().copied();
+        match r {
+            Some(r) if r.mode == 10 && !r.main.ol && !r.prov && r.range < 7 && r.si > 0.0 && r.si <= crate::dmm::OHM_NULL_MAX => {
+                self.dmm.set_ohm_null(r.si);
+                let mut t = crate::scope_ui::Txt::new("Null ");
+                let mut b = [0u8; 16];
+                t.push(crate::dmm::format(&mut b, self.dmm.ohm_null(), 3));
+                t.push(" ohm");
+                self.toast(now, t.as_str(), true);
+            }
+            _ => self.toast(now, "Null: short the leads first", false),
+        }
+    }
+
+    /// A CH2 item among the selected ones (other than the cursor
+    /// readouts): CH2's measurements are computed.
+    fn meas_ch2_wanted(&self) -> bool {
+        use crate::scope_meas as sm;
+        self.meas_sel[..self.meas_n].iter().any(|&s| sm::is_ch2(s) && !matches!(sm::item(s), 7 | 8 | 17))
     }
 
     /// Open the keypad for `target`. The generator targets open with the
@@ -2266,8 +2324,9 @@ impl App {
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
         // records); bits 28..29: the V/div zoom of range 0 (Settings::vzoom,
-        // 0 in older records: 10 mV/div); p[11] bits 16..31: the removed scope
-        // drag hold-to-grab ms (written 0, ignored on load).
+        // 0 in older records: 10 mV/div); p[11] bits 16..31: the ohm null in
+        // mohm (below; once the removed scope drag hold-to-grab ms, written
+        // 0 then, so older records read "off").
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2287,6 +2346,9 @@ impl App {
         self.sp_persist(&mut p1, &mut p11);
         p[1] = p1;
         p[11] = p11;
+        // p[11] bits 16..31 (once the removed drag hold, ignored on load
+        // by older firmware): the ohm null in mohm (0 = off).
+        p[11] |= ((self.dmm.ohm_null() * 1000.0 + 0.5) as u32).min(0xFFFF) << 16;
         self.sp_persist_ext(&mut p[crate::persist::W_SCOPE_EXT..]);
         // FR-05 rate + smoothing, UF-21 "V autorange flag is trusted" bit.
         let w = self.pw_words();
@@ -2391,6 +2453,7 @@ impl App {
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
         self.dmm.set_t_sensor(clk, (p[11] >> 8 & 0xF) as u8);
+        self.dmm.set_ohm_null((p[11] >> 16) as f32 * 1e-3);
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
@@ -2478,12 +2541,12 @@ impl App {
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
         let n = (p[10] as usize).min(4);
-        // Only valid measurement ids (0..19, index into meas_res.v), no
-        // duplicates (review 7389e8a L1).
+        // Only valid measurement ids (0..19, index into meas_res.v, with or
+        // without the CH2 flag), no duplicates (review 7389e8a L1).
         let mut k = 0;
         for i in 0..n {
             let id = (p[9] >> (8 * i)) as u8;
-            if id < 20 && !self.meas_sel[..k].contains(&id) {
+            if crate::scope_meas::valid(id) && !self.meas_sel[..k].contains(&id) {
                 self.meas_sel[k] = id;
                 k += 1;
             }
@@ -2779,8 +2842,9 @@ impl App {
                 }
                 // No linear record (rolling; a stopped record zoomed out beyond
                 // its length): no measurements, not the last frame's (#128).
-                if !self.meas_res.v[19].is_nan() {
+                if !self.meas_res.v[19].is_nan() || !self.meas_res2.v[19].is_nan() {
                     self.meas_res = crate::scope_meas::Results { v: [f32::NAN; 20] };
+                    self.meas_res2 = crate::scope_meas::Results { v: [f32::NAN; 20] };
                     self.cursor_values();
                     self.meas = [f32::NAN; 4];
                     self.sp.cells_due = true;
@@ -2798,6 +2862,7 @@ impl App {
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
                 self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
+                self.meas_res2 = if self.meas_ch2_wanted() { self.ch2_meas(&f) } else { crate::scope_meas::Results { v: [f32::NAN; 20] } };
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
@@ -3913,6 +3978,10 @@ impl App {
                     Some(Err(4)) => self.show(View::Limits, clk),
                     Some(Err(7)) => self.record_open(clk),
                     Some(Err(5)) if b == Button::Amp => self.fuse_dialog(now, 0),
+                    Some(Err(8)) if b == Button::Ohm => {
+                        self.ohm_null_tap(now);
+                        self.redraw = true;
+                    }
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);
@@ -3948,6 +4017,20 @@ impl App {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;
                     self.chart_dirty = true;
+                } else if x < ui::CHART_X + ui::CHART_W && ui::chart_rows().contains(&y) {
+                    // The plot (a single tap does nothing there): a double
+                    // tap switches the bargraph <-> the history row, as
+                    // Settings > Display > DMM row (not with the power
+                    // meter, which has its own row).
+                    if self.chart_tap != 0 && now.saturating_sub(self.chart_tap) <= CHART_DOUBLE_MS {
+                        self.chart_tap = 0;
+                        if !self.dmm.pw.on {
+                            self.dmm_view.bar_on = !self.dmm_view.bar_on;
+                            self.redraw = true;
+                        }
+                    } else {
+                        self.chart_tap = now.max(1);
+                    }
                 } else if let Some(i) = ui::button_hit(x, y) {
                     self.press_func(clk, i);
                 }
@@ -5424,11 +5507,15 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_GEN);
+                sc.tsrc = t.min(scope::TSRC_CH2);
                 None
             }
             C::TrigSource(None) => {
-                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                out.put_bytes(match sc.tsrc {
+                    scope::TSRC_GEN => b"GEN",
+                    scope::TSRC_CH2 => b"CHAN2",
+                    _ => b"CHAN1",
+                });
                 Some(())
             }
             C::GenScale(Some(v)) => {

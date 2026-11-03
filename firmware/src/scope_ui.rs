@@ -341,14 +341,18 @@ pub struct Model {
     pub dec: u8,
     pub dec_gen: u16,
     /// Trigger source (scope::TSRC_*): the trigger badge in the GEN
-    /// colour for the generator.
+    /// colour for the generator, CH2's for the DMM.
     pub tsrc: u8,
+    /// Source DMM on an A row: the trigger badge's level in A.
+    pub trig_a: bool,
     /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
     /// none (`CH2_LABEL`, a graph hole).
     /// The DMM CH2 trace shown, and its V/div ("1.5V", "--" before its
     /// first start): the DMM block.
     pub ch2_on: bool,
     pub ch2_txt: Txt,
+    /// The CH2 trace's zero row - 140 (its '2' level marker, `CH2_LEVEL`).
+    pub ch2_pos: i16,
     /// The GEN trace shown and its V/div: the GEN block.
     pub gen_on: bool,
     pub gen_txt: Txt,
@@ -435,8 +439,10 @@ impl Model {
         dec: 0,
         dec_gen: 0,
         tsrc: 0,
+        trig_a: false,
         ch2_on: false,
         ch2_txt: Txt::EMPTY,
+        ch2_pos: 0,
         gen_on: false,
         gen_txt: Txt::EMPTY,
         wave: false,
@@ -887,16 +893,22 @@ pub fn fmt_srate(out: &mut Buf, fs: u32) {
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
     let mut b = Buf::new();
-    fmt_v(&mut b, m.trig_v, m.unit());
+    // Source DMM: the level on CH2's scale, in its unit.
+    let unit = if m.tsrc == crate::scope::TSRC_CH2 && m.trig_a { "A" } else { m.unit() };
+    fmt_v(&mut b, m.trig_v, unit);
     // The wave view's "-1.23mA" is wider than the stock box: a decimal
     // fewer ("-1.2mA").
     if sf::text_width(sf::SC_F12, b.as_str(), 0) > 49 {
         b = Buf::new();
-        fmt_v_cut(&mut b, m.trig_v, m.unit(), 1);
+        fmt_v_cut(&mut b, m.trig_v, unit, 1);
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    let c = if m.tsrc == crate::scope::TSRC_GEN { C_GEN_TR } else { m.pal_text() };
+    let c = match m.tsrc {
+        crate::scope::TSRC_GEN => C_GEN_TR,
+        crate::scope::TSRC_CH2 => C_CH2,
+        _ => m.pal_text(),
+    };
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
 }
 
@@ -1125,8 +1137,16 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 }
 
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
+/// First byte of a measurement cell's text: the item measures CH2 (its
+/// text in the CH2 colour; not drawn).
+pub const CELL_CH2: u8 = 0x02;
+
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
     let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
+    let (text, ch2) = match text.strip_prefix(CELL_CH2 as char) {
+        Some(t) => (t, true),
+        None => (text, false),
+    };
     // The widest texts ("Freq:444.4kHz", 98 px) do not fit the 94 px cell
     // of the 39 px divisions: the label's first letter then ("F:444.4kHz").
     let text = match text.find(':') {
@@ -1138,7 +1158,7 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         _ => Txt::new(text),
     };
     let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
-    let pal = m.pal_text();
+    let pal = if ch2 { C_CH2 } else { m.pal_text() };
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -1287,8 +1307,11 @@ impl MarkInk {
 }
 
 /// Level-item slots (CH1, trigger level, math offset, runt level, Y
-/// cursors).
-pub const NSTRIP: usize = 6;
+/// cursors, CH2).
+pub const NSTRIP: usize = 7;
+/// Level-item id of the CH2 (DMM) zero row: a '2' marker in the CH2
+/// colour while CH2 is shown, dragged up / down as CH1's.
+pub const CH2_LEVEL: u8 = 6;
 /// Level-item id of the trigger level.
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
@@ -1355,6 +1378,10 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     }
     if let Some(r) = m.runt_row {
         out[n] = (5, level(if r > 280 { 281 } else { r }, FAM_T, m.sel_v == 5, C_ORANGE));
+        n += 1;
+    }
+    if m.ch2_on {
+        out[n] = (CH2_LEVEL, level(off_row(m.ch2_pos), FAM_2, m.sel_v == CH2_LEVEL, C_CH2));
         n += 1;
     }
     if let Some(yc) = m.ycur {
@@ -3026,6 +3053,8 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 /// The MF popup's tabs (stock four, opendm40 Decode).
 pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+/// MF > Measure: the grid place of the Source cell (after the 20 items).
+const MEAS_SRC_CELL: i16 = 20;
 /// Tab pitch (stock four tabs: 101 px; five: 80).
 const MF_TAB_W: i16 = 80;
 
@@ -3070,6 +3099,8 @@ pub struct PopVals {
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// MF > Measure: the next picked item measures CH2 (the Source cell).
+    pub meas_src2: bool,
 }
 
 /// Which popup is open (tab).
@@ -3265,15 +3296,24 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
     match tab {
         0 => {
             fill_c(rect(15, 61, 398, 110), pc, C_POP_BG);
+            // The item names in the colour of the channel they measure.
+            let ink = if v.meas_src2 { C_CH2 } else { C_WHITE };
             for i in 0..20i16 {
                 let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
                 let c = if v.pressed_cell == Some(i as u8) { C_DIS } else { C_BAR };
-                rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], C_WHITE);
+                rbox_text(r, pc, 8, c, C_POP_BG, sf::SC_F16, MEAS_NAMES[i as usize], ink);
             }
+            // opendm40: the Source cell in the grid's free 21st place.
+            let i = MEAS_SRC_CELL;
+            let r = rect(16 + 57 * (i % 7), 66 + 35 * (i / 7), 55, 30);
+            let (t, c) = if v.meas_src2 { ("CH2", C_CH2) } else { ("CH1", C_YELLOW) };
+            rbox_text(r, pc, 8, C_POP_TAB, C_POP_BG, sf::SC_F16, t, c);
             fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
             for k in 0..v.meas_n.min(4) as usize {
                 let r = rect(16 + 57 * k as i16, 176, 55, 30);
-                rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[v.meas[k] as usize % 20], C_YELLOW);
+                let sel = v.meas[k];
+                let c = if crate::scope_meas::is_ch2(sel) { C_CH2 } else { C_YELLOW };
+                rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[crate::scope_meas::item(sel) as usize % 20], c);
             }
             rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
             rbox_text(rect(348, 176, 60, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
@@ -3332,9 +3372,11 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: the trigger source (the generator computed, edge only).
             fill_c(rect(14, 186, 399, 50), pc, C_POP_BG);
             fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, "Source:", C_FILL, 1, 0);
-            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
-            if v.tsrc == crate::scope::TSRC_GEN {
-                fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
+            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(2) as usize);
+            match v.tsrc {
+                crate::scope::TSRC_GEN => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0),
+                crate::scope::TSRC_CH2 => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, CH2 scale", C_FILL, 1, 0),
+                _ => {}
             }
         }
         3 => {
@@ -3359,7 +3401,7 @@ pub const TP_PLUS: Rect = rect(362, 164, 36, 18);
 pub const TR_HINT: Rect = rect(214, 164, 189, 18);
 // Trigger source row, Display tab GEN trace row (opendm40).
 pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
-pub const TS_LIST: Rect = rect(24, 208, 120, 24);
+pub const TS_LIST: Rect = rect(24, 208, 180, 24);
 pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
@@ -3401,6 +3443,8 @@ pub enum MfHit {
     Tab(u8),
     Cell(u8),
     SelCell(u8),
+    /// The Source cell (opendm40): CH1 / CH2 for the next picked item.
+    MeasSrc,
     Clear,
     Default,
     Roll(bool),
@@ -3447,7 +3491,13 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
             if y < 171 {
                 let (c, r) = (((x - 15) / 57).clamp(0, 6), ((y - 64) / 35).clamp(0, 2));
                 let i = r * 7 + c;
-                return if i < 20 { MfHit::Cell(i as u8) } else { MfHit::Inside };
+                return if i < 20 {
+                    MfHit::Cell(i as u8)
+                } else if i == MEAS_SRC_CELL {
+                    MfHit::MeasSrc
+                } else {
+                    MfHit::Inside
+                };
             }
             let k = ((x - 15) / 57).max(0);
             if x < 278 {
@@ -3486,7 +3536,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Mode(i)
             } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
                 MfHit::TType(i)
-            } else if let Some(i) = option_hit(TS_LIST, 2, 60, x, y) {
+            } else if let Some(i) = option_hit(TS_LIST, 3, 60, x, y) {
                 MfHit::TSrc(i)
             } else if v.ttype == crate::trigsoft::PULSE {
                 if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {

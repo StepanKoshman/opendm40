@@ -75,6 +75,10 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// The DMM CH2 store (scope.rs: the CH2 trigger source).
+#[allow(dead_code, static_mut_refs)]
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -3454,14 +3458,14 @@ fn main() {
                     save(&out, &format!("x{:02}-{tag}-{}", i + 1, if ext { "ext" } else { "noext" }));
                     bufs.push(emu().fb.clone());
                 }
-                // Nothing but the extra digit's cell (341..398 + the box's
-                // end to 400, rows 68..147) differs.
+                // Nothing but the extra digit's cell (345..402, rows
+                // 68..147) differs.
                 ck.cases += 1;
                 let mut bx = EMPTY;
                 let mut n = 0;
                 for i in 0..W * 320 {
                     let (x, y) = (i % W, i / W);
-                    if bufs[0][i] != bufs[1][i] && !((341..400).contains(&x) && (68..148).contains(&y)) {
+                    if bufs[0][i] != bufs[1][i] && !((345..402).contains(&x) && (68..148).contains(&y)) {
                         bx.add(x as i32, y as i32);
                         n += 1;
                     }
@@ -3732,7 +3736,15 @@ fn main() {
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
+        ui::ohm_null_button(0.0);
+        ck.check_opts("range/ohm-null-off", &page_regions, false);
         save(&out, "m07-range-ohm-on");
+        // Ohm null on (Resistor Settings "Null"): the button with its value.
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(7), 0, None);
+        ui::ohm_null_button(0.123);
+        ck.check_opts("range/ohm-null-on", &page_regions, false);
+        save(&out, "m07c-range-ohm-null");
         host::reset(0);
         ui::range_page(Button::Cap, Some(7), 0, None);
         save(&out, "m07b-range-cap");
@@ -3790,6 +3802,23 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // Ohm null on: "NULL" after the test current (600 ohm range, the
+        // widest current text with the "ON" variant off and on).
+        for on in [false, true] {
+            host::reset(0);
+            let (r, _) = find("ohm_k");
+            let r = Reading { range: 1, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.label = None;
+            dv.ohm_null = true;
+            dv.draw_static(Button::Ohm, r.mode, false, on);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            ck.check(&format!("dmm-ohm-null/{}", on as u8), &dmm_page_regions);
+            if !on {
+                save(&out, "d06b-dmm-ohm-null");
+            }
+        }
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");

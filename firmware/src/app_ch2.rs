@@ -28,6 +28,9 @@ pub struct Ch2 {
     /// stream): restart it at the next RUN (the samples in between were
     /// thrown away).
     pub frozen: bool,
+    /// Vertical position: the zero row - 140 (rows of the 280-row model,
+    /// as CH1's `Settings::pos`; the '2' marker, scope_ui::CH2_LEVEL).
+    pub pos: i16,
 }
 
 /// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
@@ -40,7 +43,16 @@ pub struct Ch2 {
 pub const CH2_MAX_FS: u32 = 38_400;
 
 impl Ch2 {
-    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false };
+    pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false, pos: 0 };
+}
+
+impl crate::pack10::Src for scope_ch2::MeasSrc<'_> {
+    fn len(&self) -> usize {
+        self.n()
+    }
+    fn at(&self, i: usize) -> u16 {
+        self.code(i)
+    }
 }
 
 /// The CH2 V/div label ("1.5V", "200mA").
@@ -217,6 +229,28 @@ impl App {
         }
     }
 
+    /// CH2's scope measurements over the frame's time window (the CH2
+    /// samples taken while CH1's visible samples were): all NaN while CH2
+    /// is off, rolling, or holds no sample of that window. The cursor items
+    /// (7 / 8 / 17) are `cursor_values`'. Not inlined: its 2 KB
+    /// histogram (`scope_meas::compute_codes`) must not join the frame of
+    /// `run` (main.rs; tools/stack-depth headroom), where CH1's already is.
+    #[inline(never)]
+    pub(super) fn ch2_meas(&self, f: &scope::Frame) -> crate::scope_meas::Results {
+        let none = crate::scope_meas::Results { v: [f32::NAN; 20] };
+        if !self.ch2.on || self.scope.wave_on() || f.cols.is_some() || f.data.len() < 2 {
+            return none;
+        }
+        let Some((t0, step)) = self.scope.rec_time() else { return none };
+        let Some(off) = self.scope.record().offset_of(&f.data) else { return none };
+        let st = scope_ch2::store();
+        let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
+        let len = f.data.len() as f32 * step as f32;
+        let Some((ia, ib)) = st.range(t0, len) else { return none };
+        let (src, v_0, v_k) = st.meas_src(ia, ib);
+        crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k)
+    }
+
     /// CH2 rows of a frame (model rows per engine column, 0 V on the
     /// centre row at the CH2 V/div): from the stored record's time
     /// (`Scope::rec_time`, the frame's offset in it), or the live roll's
@@ -229,7 +263,8 @@ impl App {
         }
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
-        let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        let z = 140.0 + self.ch2.pos as f32;
+        let row = |v: f32| (z - v * k).clamp(-30000.0, 30000.0) as i16;
         // Columns left to right (rising times): one anchor search per frame
         // and f32 maths per column (`Store::span_run`).
         let mut run = st.run();

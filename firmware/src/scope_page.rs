@@ -153,6 +153,8 @@ struct Cache {
     /// (docs/scope-gen-channel.md).
     gseg: [(i16, i16); scope::COLS],
     c2seg: [(i16, i16); scope::COLS],
+    /// `Ch2::pos` the c2seg rows were made at (a drag previews the move).
+    c2pos: i16,
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -172,6 +174,7 @@ static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; scope::COLS],
     gseg: [su::EMPTY; scope::COLS],
     c2seg: [su::EMPTY; scope::COLS],
+    c2pos: 0,
     valid: false,
     pos: 0,
     hpos: 200,
@@ -540,7 +543,8 @@ impl App {
             probe: probe_idx(s.probe) as u8,
             ac: s.ac,
             trig_row: s.trig_row as i16,
-            trig_v: self.scope.trig_volts(),
+            trig_v: if s.tsrc == scope::TSRC_CH2 && !wave { self.scope.ch2_level() } else { self.scope.trig_volts() },
+            trig_a: crate::scope_ch2::store().scale().amps,
             rising: s.rising,
             trig_px: su::col_of_eng(s.hpos) as i16,
             pos: s.pos as i16,
@@ -595,6 +599,7 @@ impl App {
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_on: self.ch2.on && !wave,
             ch2_txt: self.ch2_label(),
+            ch2_pos: self.ch2.pos,
             gen_on: self.scope.gen_trace,
             gen_txt: self.gen_label(),
         }
@@ -768,19 +773,28 @@ impl App {
         let m = self.sp_model(self.now);
         let mut b: [[u8; 24]; 4] = [[0; 24]; 4];
         let mut n = [0usize; 4];
+        let amps2 = crate::scope_ch2::store().scale().amps;
         for i in 0..self.meas_n.min(4) {
-            let id = self.meas_sel[i];
+            let sel = self.meas_sel[i];
+            let id = crate::scope_meas::item(sel);
+            let c2 = crate::scope_meas::is_ch2(sel);
+            let (res, amps) = if c2 { (&self.meas_res2, amps2) } else { (&self.meas_res, m.amps) };
             // Stock label "Vp-p:" (ours: "Vpp:").
             let mut t = [0u8; 24];
-            let f = crate::scope_meas::format_unit(&mut t, id, self.meas_res.v[id as usize], m.amps);
+            let f = crate::scope_meas::format_unit(&mut t, id, res.v[id as usize], amps);
             let (pre, rest): (&[u8], &[u8]) = match (f.strip_prefix("Vpp"), f.strip_prefix("Ipp")) {
                 (Some(r), _) => (b"Vp-p", r.as_bytes()),
                 (_, Some(r)) => (b"Ip-p", r.as_bytes()),
                 _ => (b"", f.as_bytes()),
             };
-            let k = (pre.len() + rest.len()).min(24);
-            b[i][..pre.len()].copy_from_slice(pre);
-            b[i][pre.len()..k].copy_from_slice(&rest[..k - pre.len()]);
+            // A CH2 item: the cell's colour mark first (su::meas_cell).
+            let mark: &[u8] = if c2 { &[su::CELL_CH2] } else { b"" };
+            let k = (mark.len() + pre.len() + rest.len()).min(24);
+            let mut j = 0;
+            for &c in mark.iter().chain(pre).chain(rest).take(k) {
+                b[i][j] = c;
+                j += 1;
+            }
             n[i] = k;
         }
         let txt = |i: usize| core::str::from_utf8(&b[i][..n[i]]).unwrap_or("--");
@@ -873,6 +887,7 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        c.c2pos = self.ch2.pos;
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
@@ -902,7 +917,7 @@ impl App {
             // Owner 2026-11-01: both vanished while a stopped record was
             // panned.
             g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, gky, kx, zr));
-            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, (self.ch2.pos - c.c2pos) as i32, hpos, 1.0, kx, 0.0));
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
             g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
@@ -1688,9 +1703,12 @@ impl App {
         let mut st = self.scope.s;
         match id {
             0 => {
-                // CH1 position; the trigger row moves with it (same voltage).
+                // CH1 position; the trigger row moves with it (same voltage;
+                // not with source DMM, whose level is on CH2's scale).
                 let p = (st.pos + rows).clamp(-392, 392);
-                st.trig_row += p - st.pos;
+                if st.tsrc != scope::TSRC_CH2 {
+                    st.trig_row += p - st.pos;
+                }
                 st.runt_row += p - st.pos;
                 st.pos = p;
                 self.sp_code(3);
@@ -1720,6 +1738,23 @@ impl App {
                 self.cur.y[i] = (self.cur.y[i] + rows).clamp(1, 279);
                 self.cursor_values();
                 self.sp_code(5 + 10 * i as u8);
+                return;
+            }
+            su::CH2_LEVEL if self.ch2.on => {
+                // The DMM CH2 trace's position (screen only, as its V/div);
+                // source DMM: the trigger row moves with it (same level).
+                let p = (self.ch2.pos as i32 + rows).clamp(-392, 392);
+                let d = p - self.ch2.pos as i32;
+                self.ch2.pos = p as i16;
+                self.scope.ch2_pos = self.ch2.pos;
+                self.sp_code(16);
+                self.sp_settings_changed();
+                if st.tsrc == scope::TSRC_CH2 && d != 0 {
+                    st.trig_row = (st.trig_row + d).clamp(-10, 290);
+                    self.sp_preview(st);
+                } else {
+                    self.sp_render();
+                }
                 return;
             }
             _ => return,
@@ -1810,7 +1845,7 @@ impl App {
                 self.gest_log.copy_within(1.., 0);
                 GEST_N - 1
             };
-            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15) as u8;
+            let v = matches!(t.code, 1 | 3 | 5 | 6 | 8 | 15 | 16) as u8;
             self.gest_log[i] = (t.code, v, t.travel.clamp(-999, 999) as i16, now.saturating_sub(t.t0).min(9999) as u16);
         }
         if self.sp.frozen {
@@ -1902,8 +1937,10 @@ impl App {
     /// selection from before the first tap comes back with "off".
     fn sp_cur_cycle(&mut self) {
         const XS: [u8; 2] = [7, 8];
+        // Y: Y2-1 of CH1, and of CH2 (its V/div) while CH2 is shown.
         const YS: [u8; 1] = [17];
-        let cur = |id: &u8| XS.contains(id) || YS.contains(id);
+        const YS2: [u8; 2] = [17, 17 | crate::scope_meas::CH2];
+        let cur = |id: &u8| XS.contains(&crate::scope_meas::item(*id)) || YS.contains(&crate::scope_meas::item(*id));
         let state = self.sp_cur_state();
         let base = match self.sp.cur_saved {
             Some(b) if state != su::CUR_OFF => b,
@@ -1918,6 +1955,7 @@ impl App {
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
+            su::CUR_X if self.ch2.on => &YS2,
             su::CUR_X => &YS,
             _ => &[],
         };
@@ -1944,8 +1982,9 @@ impl App {
     /// Cursor tab state from the measurement selection.
     fn sp_cur_state(&self) -> u8 {
         let sel = &self.meas_sel[..self.meas_n];
-        let x = sel.contains(&7) || sel.contains(&8);
-        let y = sel.contains(&17);
+        let has = |id: u8| sel.iter().any(|&s| crate::scope_meas::item(s) == id);
+        let x = has(7) || has(8);
+        let y = has(17);
         match (x, y) {
             (true, false) => su::CUR_X,
             (false, true) => su::CUR_Y,
@@ -1988,6 +2027,22 @@ impl App {
                     st.trig_row -= st.pos;
                     st.runt_row -= st.pos;
                     st.pos = 0;
+                }
+                su::CH2_LEVEL if self.ch2.on => {
+                    // CH2 back on the centre line (source DMM: the level too).
+                    if self.scope.s.tsrc == scope::TSRC_CH2 {
+                        let mut s2 = self.scope.s;
+                        s2.trig_row = (s2.trig_row - self.ch2.pos as i32).clamp(-10, 290);
+                        self.scope_set(s2, now);
+                    }
+                    self.ch2.pos = 0;
+                    self.scope.ch2_pos = 0;
+                    self.sp_render();
+                    self.sp_settings_changed();
+                    self.beep(now, 60);
+                    self.sp.touch = None;
+                    self.sp.guide_until = now + GUIDE_MS;
+                    return;
                 }
                 1 => {
                     let (hi, lo) = (self.meas_res.v[12], self.meas_res.v[13]);
@@ -2319,6 +2374,7 @@ impl App {
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
+            meas_src2: self.meas_src2,
         }
     }
 
@@ -2601,11 +2657,18 @@ impl App {
                 return;
             }
             su::MfHit::Cell(i) => {
+                // The channel picked with the Source cell (opendm40).
+                let i = if self.meas_src2 { i | crate::scope_meas::CH2 } else { i };
                 // Refuse a duplicate or a 5th item silently (stock).
                 if self.meas_n < 4 && !self.meas_sel[..self.meas_n].contains(&i) {
                     self.meas_sel[self.meas_n] = i;
                     self.meas_n += 1;
                     self.cursors_from_selection();
+                    // A stopped scope: one more frame measures the new CH2
+                    // item (running: the next 300 ms result does).
+                    if crate::scope_meas::is_ch2(i) {
+                        self.scope.refresh();
+                    }
                 }
             }
             su::MfHit::SelCell(k) => {
@@ -2615,6 +2678,9 @@ impl App {
                     self.meas_n -= 1;
                     self.cursors_from_selection();
                 }
+            }
+            su::MfHit::MeasSrc => {
+                self.meas_src2 = !self.meas_src2;
             }
             su::MfHit::Clear => {
                 self.meas_n = 0;
@@ -2649,10 +2715,13 @@ impl App {
                 // The page height is the same, the rows below change.
             }
             su::MfHit::TSrc(t) => {
-                st.tsrc = t.min(1);
+                st.tsrc = t.min(scope::TSRC_CH2);
                 self.scope_set(st, now);
                 if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
                     self.toast(now, "Generator is off", false);
+                }
+                if st.tsrc == scope::TSRC_CH2 && !self.ch2.on {
+                    self.toast(now, "CH2 (DMM) is off", false);
                 }
             }
             su::MfHit::Ch2(on) => {
@@ -3002,10 +3071,14 @@ impl App {
             | (s.tsrc as u32 & 1) << 4
             | (self.scope.gen_trace as u32) << 5
             | (self.ch2.on as u32) << 6
+            // Bit 7: source DMM (CH2; bit 4 then 0).
+            | ((s.tsrc == scope::TSRC_CH2) as u32) << 7
             // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
+        // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
+        p[5] = self.ch2.pos as u16 as u32;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3029,10 +3102,12 @@ impl App {
         let dd = scope::Settings::DEFAULT;
         st.ttype = (p[3] & 3).min(2) as u8;
         st.pcond = (p[3] >> 2 & 3).min(2) as u8;
-        st.tsrc = (p[3] >> 4 & 1) as u8;
+        st.tsrc = if p[3] >> 7 & 1 != 0 { scope::TSRC_CH2 } else { (p[3] >> 4 & 1) as u8 };
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
+        self.scope.ch2_pos = self.ch2.pos;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };

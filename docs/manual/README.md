@@ -600,6 +600,14 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **Null** (range page, beside 600MΩ experimental): the resistance of your
+  test leads, taken off every reading. Short the leads, wait for a steady
+  reading, tap **Null**: the button shows the value (for example **Null
+  0.123 Ω**) and the multimeter page shows **NULL** after the test current.
+  Tap it again to switch it off. Up to 10 Ω; not on 600 MΩ. It is
+  independent of REL (both can be on) and is kept in the settings, also
+  over a power-off, so the same leads need it only once. Below 0 Ω only
+  with **Negative ohm** ON.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
@@ -909,7 +917,8 @@ The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
 ### The bargraph and the history row
 
 **Settings > Display > DMM row** chooses what the row under the reading
-shows: **Bargraph** (default) or **History**.
+shows: **Bargraph** (default) or **History**. A double tap on the trend
+chart's plot switches between them too (not with the power meter).
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
   DC A (25 segments per side, 4 % each), from zero elsewhere, empty in
@@ -1359,7 +1368,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
-| **Source** | **CH1**, or **GEN**: the generator's own output. |
+| **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1386,6 +1395,14 @@ the trigger badge turns cyan. Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
 generator off, nothing triggers (Auto still shows frames). SCPI
 `TRIGger:SOURce GENerator`.
+
+**Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)):
+the level is read on CH2's scale (the T marker against the magenta trace;
+the badge shows it in CH2's unit and turns magenta), and moving CH2 with
+its **2** marker moves the level with it. It is an edge trigger, searched
+in CH2's samples (at most 38.4 k samples/s), so the trigger point is as
+exact as one CH2 sample. With CH2 off, nothing triggers (Auto still shows
+frames). SCPI `TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 
@@ -1440,6 +1457,14 @@ Press **MF**: the **Measure** tab lists 20 measurements. Tap up to four;
 tap a selected one to remove it. **Clear** removes all, **Default**
 restores Freq, Vp-p, Cycl, Vrms.
 
+The last cell of the grid, **CH1** / **CH2**, chooses the channel the next
+tapped item measures. With **CH2** the names turn magenta and the item
+measures the multimeter channel ([CH2 (DMM)](#display-settings)); its
+value is magenta in the measurement row, so Freq of CH1 and Freq of CH2
+can sit side by side. The CH2 measurements use the CH2 samples taken while
+the screen's CH1 samples were (at most 38.4 k samples/s: Freq and the
+widths of fast signals are coarse) and show **--** while CH2 is off.
+
 
 ![The Measure tab](img/scope-measure.png)
 
@@ -1471,7 +1496,9 @@ record zoomed out beyond its length, they show **--**.
 
 Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
-Y2-1. Drag the **1** / **2** markers.
+Y2-1. Drag the **1** / **2** markers. While CH2 is on, **CUR Y** shows two
+Y2-1: the yellow one at the CH1 V/div, the magenta one at the CH2 V/div
+(the **DMM** block's).
 
 
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
@@ -1537,7 +1564,9 @@ not use the trigger hardware.
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
 signal, alongside the scope. Its on / off and V/div (A/div) are also on the
-**DMM** block; 0 is the centre line. It works in V, mV and
+**DMM** block. Its zero line has a magenta **2** marker on the left: drag
+it up or down to move the trace (double tap: back to the centre); the
+position is kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
