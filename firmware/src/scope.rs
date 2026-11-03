@@ -311,6 +311,9 @@ pub const PROBES: [f32; 13] = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 1
 /// Probe button labels (scope settings window, Settings tab).
 pub const PROBE_NAMES: [&str; 13] = ["x0.1", "x0.2", "x0.5", "x1", "x2", "x5", "x10", "x20", "x50", "x100", "x200", "x500", "x1000"];
 const XR: [f32; 10] = [0.04, 0.04, 0.04, 0.4, 0.4, 0.4, 4.0, 4.0, 4.0, 4.0];
+/// Largest CH1 zero (`Scope::zero`), ADC codes: an i8 of quarter codes
+/// (about 3 mV at 10 mV/div, 3 V at 10 V/div), far beyond a real offset.
+pub const ZERO_MAX: f32 = 31.75;
 const G_DEFAULT: [f32; 10] = [944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 944.0, 727.0, 598.0, 556.0];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -607,6 +610,9 @@ pub struct Scope {
     /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
     /// record needs its time (`rec_time`), the comparator is off.
     pub ch2_on: bool,
+    /// The user's CH1 zero per hardware range, ADC codes added to the
+    /// calibration's (`gain`, `zero_set`; settings W_SCOPE_EXT + 5..7).
+    zero: [f32; 10],
     /// The acquisition in flight: DWT count of its sample 0 (None: a
     /// comparator record, the wave view) and DWT cycles per sample; the
     /// stored record's (BUF[0]).
@@ -973,6 +979,7 @@ impl Scope {
             gen_trace: false,
             gen_vdiv: 255,
             ch2_on: false,
+            zero: [0.0; 10],
             t_s0: None,
             t_step: 1.0,
             stored_t0: None,
@@ -1046,7 +1053,53 @@ impl Scope {
     }
 
     fn gain(&self, r: usize) -> (f32, f32) {
-        cal_pair(0x08, r, (G_DEFAULT[r], 512.0))
+        // The user zero (`zero_set`) shifts both codes: every code <-> volt
+        // map (trace, measurements, trigger level, comparator, CSV, SCPI)
+        // takes it alike.
+        let (g0, g1) = cal_pair(0x08, r, (G_DEFAULT[r], 512.0));
+        let z = self.zero[r.min(9)];
+        (g0 + z, g1 + z)
+    }
+
+    /// CH1 zero (CH1 popup > Coupling "Zero", input shorted, DC): the live
+    /// range's code offset becomes such that the mean `vavg` (V at the probe
+    /// tip, with the present zero) reads 0. false (nothing changed): no
+    /// finite mean, AC coupling, the wave view, or beyond +-ZERO_MAX codes.
+    pub fn zero_set(&mut self, vavg: f32) -> bool {
+        let r = self.s.range.min(9);
+        if self.wave || self.s.ac || !vavg.is_finite() {
+            return false;
+        }
+        let (g0, g1) = self.gain(r);
+        let vpc = XR[r] / (g0 - g1) * self.s.probe;
+        let z = self.zero[r] + vavg / vpc;
+        if !z.is_finite() || z.abs() > ZERO_MAX {
+            return false;
+        }
+        self.zero[r] = (z * 4.0).round() / 4.0;
+        true
+    }
+
+    /// Every range's zero back to the factory calibration.
+    pub fn zero_clear(&mut self) {
+        self.zero = [0.0; 10];
+    }
+
+    /// The live range's zero in volts at the probe tip: the offset it
+    /// takes off (what a shorted input read before; 0: none).
+    pub fn zero_volts(&self) -> f32 {
+        let r = self.s.range.min(9);
+        let (g0, g1) = self.gain(r);
+        self.zero[r] * XR[r] / (g0 - g1) * self.s.probe
+    }
+
+    /// The zeros as settings bytes (quarter codes, i8; 0 = none) / back.
+    pub fn zero_bytes(&self) -> [u8; 10] {
+        self.zero.map(|z| ((z * 4.0).round().clamp(-127.0, 127.0) as i8) as u8)
+    }
+
+    pub fn set_zero_bytes(&mut self, b: [u8; 10]) {
+        self.zero = b.map(|v| (v as i8) as f32 / 4.0);
     }
 
     /// Hardware range of the codes currently being served: the capture range
