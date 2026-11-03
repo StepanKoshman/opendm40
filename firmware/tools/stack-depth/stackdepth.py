@@ -64,17 +64,14 @@ def nregs(lst):
 
 
 def parse(lines):
-    """Functions by start address ({addr: {...}}): local symbols repeat
-    (the machine outliner's OUTLINED_FUNCTION_<n> in each crate), so a name
-    is not one function; calls are by target address."""
     fn_re = re.compile(r'^([0-9a-f]{8}) <(.*)>:$')
     ins_re = re.compile(r'^\s*([0-9a-f]+):\s+(\S+)\s*(.*)$')
     funcs, cur = {}, None
     for l in lines:
         m = fn_re.match(l)
         if m:
-            cur = int(m.group(1), 16)
-            funcs[cur] = {'name': m.group(2), 'frame': 0, 'calls': set(), 'ind': False, 'dyn': False}
+            cur = m.group(2)
+            funcs[cur] = {'frame': 0, 'calls': set(), 'ind': False, 'dyn': False}
             continue
         if cur is None:
             continue
@@ -103,12 +100,9 @@ def parse(lines):
             # A call / tail call targets a function's first instruction;
             # a target inside another function (`<foo+0x34a>`) is not one:
             # it is a disassembled literal / padding after a return.
-            t = re.search(r'(?:0x)?([0-9a-f]+) <(.*)>', args)
-            if t and not re.search(r'\+0x[0-9a-f]+$', t.group(2)):
-                ta = int(t.group(1), 16)
-                if ta != cur:
-                    f['calls'].add(ta)
-    # Calls into the middle of nothing known are dropped by depth().
+            t = re.search(r'<(.*)>', args)
+            if t and not re.search(r'\+0x[0-9a-f]+$', t.group(1)) and t.group(1) != cur:
+                f['calls'].add(t.group(1))
     return funcs
 
 
@@ -142,14 +136,11 @@ def main():
     dis = subprocess.run([tool('llvm-objdump'), '-d', '--no-show-raw-insn', '-C', a.elf],
                          capture_output=True, text=True, check=True).stdout.split('\n')
     funcs = parse(dis)
-    by_name = {}
-    for ad, f in funcs.items():
-        by_name.setdefault(f['name'], []).append(ad)
     for cpat, tpat in INDIRECT:
-        targets = [ad for ad, f in funcs.items() if re.search(tpat, f['name'])]
-        for ad, f in funcs.items():
-            if re.search(cpat, f['name']):
-                f['calls'].update(t for t in targets if t != ad)
+        targets = [n for n in funcs if re.search(tpat, n)]
+        for n in funcs:
+            if re.search(cpat, n):
+                funcs[n]['calls'].update(t for t in targets if t != n)
     sys.setrecursionlimit(20000)
     memo, rec = {}, set()
 
@@ -170,13 +161,13 @@ def main():
         memo[fn] = r
         return r
 
-    if a.root not in by_name:
+    if a.root not in funcs:
         sys.exit('stackdepth: root %s not in the disassembly' % a.root)
-    worst, path = depth(by_name[a.root][0])
+    worst, path = depth(a.root)
     isr_txt, isr_paths = '', []
     for isr in ISRS:
-        if isr in by_name:
-            d, ip = depth(by_name[isr][0])
+        if isr in funcs:
+            d, ip = depth(isr)
             isr_paths.append((isr, d, ip))
     if isr_paths:
         isr, d, ip = max(isr_paths, key=lambda t: t[1])
@@ -197,7 +188,7 @@ def main():
         f = funcs[p]
         acc += f['frame']
         flags = (' [indirect calls]' if f['ind'] else '') + (' [dynamic sp]' if f['dyn'] else '')
-        print('  %6d %6d  %s%s' % (f['frame'], acc, f['name'][:140], flags))
+        print('  %6d %6d  %s%s' % (f['frame'], acc, p[:140], flags))
     for isr, d, ip in isr_paths:
         acc = 0
         print('ISR %s (+%d exception frame):' % (isr, EXC_FRAME))
@@ -205,13 +196,13 @@ def main():
             f = funcs[p]
             acc += f['frame']
             flags = (' [indirect calls]' if f['ind'] else '') + (' [dynamic sp]' if f['dyn'] else '')
-            print('  %6d %6d  %s%s' % (f['frame'], acc, f['name'][:140], flags))
+            print('  %6d %6d  %s%s' % (f['frame'], acc, p[:140], flags))
     if rec:
-        print('  (recursion cut at: %s)' % ', '.join(sorted(funcs[r]['name'][:60] for r in rec)[:5]))
+        print('  (recursion cut at: %s)' % ', '.join(sorted(r[:60] for r in rec)[:5]))
     if a.top:
         print('largest frames:')
-        for ad in sorted(funcs, key=lambda n: -funcs[n]['frame'])[:a.top]:
-            print('  %6d  %s' % (funcs[ad]['frame'], funcs[ad]['name'][:140]))
+        for n in sorted(funcs, key=lambda n: -funcs[n]['frame'])[:a.top]:
+            print('  %6d  %s' % (funcs[n]['frame'], n[:140]))
     if a.check is not None and size - worst < a.check:
         print('stackdepth: headroom %d < %d bytes required' % (size - worst, a.check), file=sys.stderr)
         sys.exit(1)

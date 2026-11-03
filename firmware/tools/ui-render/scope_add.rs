@@ -764,9 +764,6 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             if !(badge > 20 && mark > 20 && line > 40) {
                 ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px"));
             }
-            // The Trigger tab with Source DMM (its note: the CH2 scale).
-            draw(&mt, scope_ui::Popup::Mf(2), &pvt, true);
-            save(out, "s08-ch2-trigger-tab");
             // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
             // the CH1 block dimmed; CH2, GEN and the trigger stay.
             let tc = m.trace_colour();
