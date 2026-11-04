@@ -1028,18 +1028,17 @@ impl App {
             scope::TrigMode::Single => crate::cold_str!("Single"),
         });
         h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
-        h.s(if wave {
-            if amps {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
-            } else {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
-            }
+        // The shared start once (each long text is a copy in region C).
+        h.s(crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); "));
+        if wave {
+            h.s(crate::cold_str!("the value column is ")).s(if amps { crate::cold_str!("amperes through the DMM A jack") } else { crate::cold_str!("volts at the DMM jacks") });
+            h.s(crate::cold_str!(" (DMM calibration applied)\r\n"));
         } else if amps {
             // CH1 type Cur: the probe factor reads amperes per input volt.
-            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n")
+            h.s(crate::cold_str!("the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n"));
         } else {
-            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
-        });
+            h.s(crate::cold_str!("volts at the probe tip\r\n"));
+        }
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, "CSV save failed", false);
