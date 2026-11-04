@@ -28,9 +28,9 @@ official opendm40 release.
 
 ### Fixed
 
-- **The T marker at the top** (the trigger position) takes the colour of the
-  trigger source (CH1, DMM / CH2, GEN) like the level marker, its line and the
-  badge; it was always CH1's colour.
+- **The T marker at the top** (the trigger position) and **its vertical guide
+  line** take the colour of the trigger source (CH1, DMM / CH2, GEN) like the
+  level marker, its line and the badge; they were always CH1's colour.
 
 ### Кратко по-русски
 
@@ -40,8 +40,9 @@ official opendm40 release.
 - **Канал DMM (CH2): единица V / A** (MF > Display рядом с On / Off): касание
   переключает и мультиметр (V или AC A). Ватт нет: ваттметр считает мощность
   по очереди на двух входах, формы сигнала мощности на одном входе нет.
-- **Метка T сверху** (положение синхронизации) теперь цвета источника
-  синхронизации (CH1, DMM, GEN), как метка уровня; была всегда цвета CH1.
+- **Метка T сверху** (положение синхронизации) и **её вертикальная линия**
+  теперь цвета источника синхронизации (CH1, DMM, GEN), как метка уровня; были
+  всегда цвета CH1.
 
 ## v0.4.15-S2084 (2026-11-03)
 

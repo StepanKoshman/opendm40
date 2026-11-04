@@ -1850,10 +1850,13 @@ impl Deco {
         };
         graph_marks(m, &mut d.marks);
         let ctr = d.trace;
+        // The trigger's guide lines (position and level): the trigger
+        // source's colour (CH1: the trace colour).
+        let tcol = if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) };
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: tcol }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
                 1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
@@ -1861,7 +1864,7 @@ impl Deco {
             }
             match m.sel_v {
                 0 if m.ch1_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
-                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) } }),
+                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: tcol }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
                     if let Some(r) = m.runt_row {

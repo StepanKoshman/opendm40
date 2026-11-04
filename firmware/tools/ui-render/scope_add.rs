@@ -802,9 +802,12 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             // glyph from x GX + 195): in the trigger source's colour too.
             let tx = (scope_ui::GX + 1 + 200 - 6) as usize;
             let tpos = count(tx, tx + 12, top, top + 14, g);
-            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px");
-            if !(badge > 20 && mark > 20 && line > 40 && tpos > 20) {
-                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px"));
+            // Its guide line down the graph (graph column 200, dashed): too.
+            let vx = (scope_ui::GX + 200) as usize;
+            let vline = count(vx, vx + 1, top + 14, top + h as usize, g);
+            println!("CH2 trigger in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px");
+            if !(badge > 20 && mark > 20 && line > 40 && tpos > 20 && vline > 40) {
+                ck.fail("gen/ch2-trigger", format!("CH2 trigger not in CH2's colour: badge {badge} px, T marker {mark} px, level line {line} px, T position {tpos} px, its line {vline} px"));
             }
             // GEN as the trigger source: the T position in the GEN colour,
             // not CH2's or CH1's.
@@ -816,9 +819,10 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             ck.check_replica("gen/gen-trigger");
             let gg = scope_ui::c_gen();
             let tgen = count(tx, tx + 12, top, top + 14, gg);
-            println!("GEN trigger in GEN's colour: T position {tgen} px");
-            if tgen <= 20 {
-                ck.fail("gen/gen-trigger", format!("GEN trigger's T position not in GEN's colour: {tgen} px"));
+            let vgen = count(vx, vx + 1, top + 14, top + h as usize, gg);
+            println!("GEN trigger in GEN's colour: T position {tgen} px, its line {vgen} px");
+            if tgen <= 20 || vgen <= 40 {
+                ck.fail("gen/gen-trigger", format!("GEN trigger's T position / line not in GEN's colour: {tgen} / {vgen} px"));
             }
             // CH1 hidden (owner 2026-11-03): no CH1 trace or 'A' marker,
             // the CH1 block dimmed; CH2, GEN and the trigger stay.
