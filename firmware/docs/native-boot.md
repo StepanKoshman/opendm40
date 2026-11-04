@@ -1362,11 +1362,17 @@ only through an address.
 
 ### Region B audit #11 (2026-11-03, dmm-trigger2)
 
+**Withdrawn the same day.** v0.4.12-sk1, which had this series in it, froze
+after being installed on a meter and then restarted; the 0.4.11-sk1 code
+(PR build 3866cd4, tested on the meter) ran. v0.4.15-S2084 is that code again,
+the series is out of the tree (it stays in git: commits 5d208c6 .. 995ead3),
+and its cause was not found. The text below describes what was tried.
+
 Room for the fork's DMM (CH2) trigger and what comes next, no change in
 function. [`rprof.py`](../tools/region-profile/rprof.py) on 0.4.11-sk1:
 region B 477 KB used (406 KB code, fonts 27 KB, texts 13 KB), region C
 7.2 KB free, so nothing more moves from B to C. New:
-[`inl.py`](../tools/region-profile/inl.py), the inlined copies per function
+`inl.py` (in commit 5448022), the inlined copies per function
 from the DWARF of the debug ELF (the `#[inline(never)]` candidates).
 Each row measured as its own commit's build:
 
