@@ -699,6 +699,7 @@ impl DmmView {
     /// aligned in 285..396 (clear of the centred SHORT / BEEP, which ends
     /// at ~280), the unit from 403 to the band's rounded end, on the band's
     /// green; drawn on a change (`short_sync` forgets it).
+    #[inline(never)] // .cold (link-native.x): drawn on a change only
     fn band_aux(&mut self, v: &crate::dmm::Val, col: Color) {
         let mut t = [0u8; 16];
         let txt = meter::text(&mut t, v);
