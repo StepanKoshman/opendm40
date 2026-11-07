@@ -5,6 +5,30 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.19-S2084 (2026-11-07)
+
+On v0.4.18-S2084: the scope's panel hides for a wider graph. A test build
+of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not
+an official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **Wide graph: swipe the right panel away.** In the scope view a swipe
+  right on the channel panel (CH1 / DMM / GEN / FFT) hides it; the graph's
+  10 divisions then stretch over the whole screen (48 px instead of 39 per
+  division: some columns are 2 px wide). A swipe left from the screen's
+  right edge brings the panel back. The trigger level marker there still
+  drags as before. Not kept over a restart; the combined DMM + scope view
+  keeps the panel.
+- **A 5th automatic measurement.** MF > Measure takes up to 5 items; the
+  wide graph's measurement bar shows all 5, the normal bar the first 4.
+  Kept over a restart.
+
+Кратко: свайп вправо по правой панели осциллографа скрывает её, и 10
+делений растягиваются на весь экран; свайп влево от правого края экрана
+возвращает панель. В MF > Measure можно выбрать 5 измерений, в широком
+режиме видны все 5.
+
 ## v0.4.18-S2084 (2026-11-07)
 
 On v0.4.17-S2084: a digital phosphor for CH1. A test build of

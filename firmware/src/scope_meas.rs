@@ -31,6 +31,9 @@ pub const ITEMS: [(u8, &str, Unit); 20] = [
 
 /// Default selection (stock 0x0804c6ac): Freq, Vpp, Cycl, Vrms.
 pub const DEFAULT_SEL: [u8; 4] = [0, 10, 9, 11];
+/// Selected items at most: 5 (opendm40: the wide graph's bar has a 5th
+/// cell; the normal bar shows the first 4).
+pub const MAX_SEL: usize = 5;
 
 /// A selected item measures the DMM channel (CH2): this flag on its stock
 /// id (`App::meas_sel`; the settings word keeps it, 8 bits per item).

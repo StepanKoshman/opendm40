@@ -1568,6 +1568,13 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
 HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
+**Wide graph.** A swipe right on the right panel hides it: the graph's 10
+divisions stretch over the whole screen and the measurement bar gets a 5th
+cell. A swipe left from the screen's right edge brings the panel back (a
+press on the trigger level marker there still drags it). The combined view
+keeps the panel; the setting is not kept over a restart. MF > Measure takes
+up to 5 items; the normal bar shows the first 4.
+
 **Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
 1 column x 4 rows: bright where the trace runs in most frames, dim where it
 went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour

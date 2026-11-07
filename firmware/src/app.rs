@@ -311,7 +311,7 @@ pub struct App {
     relay_next: u64,
     /// Scope measurement items: stock ids, `scope_meas::CH2` set for the
     /// DMM channel's.
-    meas_sel: [u8; 4],
+    meas_sel: [u8; crate::scope_meas::MAX_SEL],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
     /// The DMM channel's results (CH2), by stock id as `meas_res`.
@@ -711,7 +711,7 @@ impl App {
             host_scope: false,
             anti_drop: true,
             relay_next: 0,
-            meas_sel: crate::scope_meas::DEFAULT_SEL,
+            meas_sel: [0, 10, 9, 11, 0],
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
             meas_res2: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -2309,7 +2309,8 @@ impl App {
         for i in 0..4 {
             p[9] |= (self.meas_sel[i] as u32) << (8 * i);
         }
-        p[10] = self.meas_n as u32;
+        // Bits 8..15: the 5th item (opendm40; older firmware reads min(4)).
+        p[10] = self.meas_n as u32 | (self.meas_sel[4] as u32) << 8;
         // v3 words (0 = default everywhere): p[11] bit 0 rails "Both always",
         // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
         // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
@@ -2556,12 +2557,12 @@ impl App {
         // The saved level row is at the saved scale: its volts from there.
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
-        let n = (p[10] as usize).min(4);
+        let n = (p[10] as usize & 0xff).min(crate::scope_meas::MAX_SEL);
         // Only valid measurement ids (0..19, index into meas_res.v, with or
         // without the CH2 flag), no duplicates (review 7389e8a L1).
         let mut k = 0;
         for i in 0..n {
-            let id = (p[9] >> (8 * i)) as u8;
+            let id = if i < 4 { (p[9] >> (8 * i)) as u8 } else { (p[10] >> 8) as u8 };
             if crate::scope_meas::valid(id) && !self.meas_sel[..k].contains(&id) {
                 self.meas_sel[k] = id;
                 k += 1;
