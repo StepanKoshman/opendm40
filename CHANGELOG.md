@@ -5,6 +5,19 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.17-S2084 (2026-11-06)
+
+On v0.4.16-S2084: USB works in a browser on Windows with no driver install. A
+build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40);
+not an official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **USBTMC with no driver on Windows.** The meter now carries MS OS 2.0
+  descriptors, so Windows binds WinUSB to the USBTMC interface by itself. WebUSB
+  pages, libusb and pyvisa-py open it without Zadig. The USB disk is not touched.
+  NI-VISA and Keysight users who want their own driver can still install it.
+
 ## v0.4.16-S2084 (2026-11-04)
 
 On v0.4.15-S2084 (the code that ran on the meter): the scope's current unit
