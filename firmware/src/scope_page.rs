@@ -385,7 +385,7 @@ pub(super) struct Sp {
     /// The press picked the item that was already selected (a still tap
     /// then cycles to the next overlapping one, `sp_release`).
     presel: bool,
-    cur_saved: Option<([u8; 4], usize)>,
+    cur_saved: Option<([u8; crate::scope_meas::MAX_SEL], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
     pub math: Math,
@@ -2038,7 +2038,7 @@ impl App {
             }
         };
         let rest = base.0[..base.1].iter().copied().filter(|id| !cur(id));
-        let mut sel = [0u8; 4];
+        let mut sel = [0u8; crate::scope_meas::MAX_SEL];
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
@@ -2053,7 +2053,7 @@ impl App {
             self.sp.cur_saved = None;
         } else {
             for id in lead.iter().copied().chain(rest) {
-                if n < 4 {
+                if n < crate::scope_meas::MAX_SEL {
                     sel[n] = id;
                     n += 1;
                 }
