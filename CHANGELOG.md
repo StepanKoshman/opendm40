@@ -5,6 +5,22 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.20-S2084 (2026-11-07)
+
+On v0.4.19-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### Changed
+
+- **Diode: the resistance stays readable under the SHORT / BEEP band.** The
+  green beeper band over the aux row hid the diode's resistance reading
+  (top right); it is now drawn on the band in its orange, right of the
+  SHORT / BEEP text, and follows the reading.
+
+Кратко: в режиме диода сопротивление справа вверху видно оранжевым поверх
+зелёной полосы SHORT / BEEP.
+
 ## v0.4.19-S2084 (2026-11-07)
 
 On v0.4.18-S2084: the scope's panel hides for a wider graph. A test build
