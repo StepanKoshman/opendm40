@@ -1565,8 +1565,16 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
+HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
+1 column x 4 rows: bright where the trace runs in most frames, dim where it
+went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour
+in 12 brightness steps, **HOT** blue (rare) to red (always). The count fades
+by a step every 16 frames. A drag, a pinch, a settings change, roll and STOP
+show the plain trace and start the count over. The scope record is 7 K
+samples shorter in this build (36 K) for the counts' memory.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's

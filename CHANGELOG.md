@@ -5,6 +5,31 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.18-S2084 (2026-11-07)
+
+On v0.4.17-S2084: a digital phosphor for CH1. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **Digital phosphor: MF > Display > Persist DPO / HOT.** CH1 is drawn as a
+  hit count per graph cell (1 column x 4 rows): where the trace runs in most
+  frames it is bright, where it went once in a while it is dim, so jitter,
+  noise and a rare runt show how often they happen. **DPO**: CH1's colour in
+  12 brightness steps; **HOT**: blue (rare) .. red (always). The counts are
+  logarithmic and fade by a step every 16 frames (about 0.3 s at 50 frames/s,
+  longer on slow timebases), so a change of the signal fades out within some
+  seconds. A drag, a pinch, a settings change, roll and STOP show the plain
+  trace and start the count over. Kept over a restart.
+- **The cost:** the scope record is 7 K samples shorter (36 K instead of
+  43 K; on the slow timebases' packed record 55 688 samples instead of
+  65 520), which pays for the 14 KB of counts.
+
+Кратко: цифровой люминофор для CH1 (MF > Display > Persist **DPO** — яркость
+цвета канала, **HOT** — синий → красный по частоте попаданий). Запись
+осциллографа короче на 7 K отсчётов (36 K вместо 43 K).
+
 ## v0.4.17-S2084 (2026-11-06)
 
 On v0.4.16-S2084: USB works in a browser on Windows with no driver install. A
