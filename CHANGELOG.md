@@ -14,7 +14,8 @@ an official opendm40 release. Not yet run on a real meter.
 ### New
 
 - **Wide graph: swipe the right panel away.** In the scope view a swipe
-  right on the channel panel (CH1 / DMM / GEN / FFT) hides it; the graph's
+  right on the channel panel (CH1 / DMM / GEN / FFT; 25 px of travel are
+  enough) hides it; the graph's
   10 divisions then stretch over the whole screen (48 px instead of 39 per
   division: some columns are 2 px wide). A swipe left from the screen's
   right edge brings the panel back. The trigger level marker there still

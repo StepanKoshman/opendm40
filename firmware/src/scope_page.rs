@@ -329,6 +329,9 @@ pub(super) struct Sp {
     pub swipes: bool,
     /// The wide graph (the panel hidden by a swipe; su::wide).
     pub wide: bool,
+    /// A touch that began on the panel / the wide graph's right edge: its
+    /// touch-down x (the panel's own swipe, by the drag's travel).
+    edge_x0: Option<u16>,
     pub press_fx: bool,
     pressed: u8,
     pressed_until: u64,
@@ -417,6 +420,7 @@ impl Sp {
             hpos_rem: 0,
             swipes: false,
             wide: false,
+            edge_x0: None,
             press_fx: true,
             pressed: 0,
             pressed_until: 0,
@@ -741,6 +745,7 @@ impl App {
 
     /// The page's graph rows from the cached frame (no drawing).
     pub(super) fn sp_prepare(&mut self) {
+        su::set_wide(self.sp_wide_on());
         // An open popup's box is drawn last: the graph leaves it alone.
         su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
         self.sp_render();
@@ -784,8 +789,10 @@ impl App {
 
     /// Repaint whatever changed (model diff, graph rows).
     pub(super) fn sp_update(&mut self, now: u64) {
-        // The wide graph on / off: the whole page again first.
-        if self.sp_wide_on() != su::wide() {
+        // The wide graph on / off: set here (the scope view's full redraw
+        // goes by App::repaint_strips, not sp_draw_static), then the whole
+        // page again.
+        if su::set_wide(self.sp_wide_on()) {
             self.redraw = true;
             return;
         }
@@ -1556,12 +1563,37 @@ impl App {
         // touch there, so its release is a swipe).
         if self.view == View::Scope {
             const EDGE_X: u16 = 466;
+            // The panel is 89 px wide: by the drag's travel (25 px right on
+            // the panel, 30 px left from the edge), not gesture.rs's swipe
+            // (60 px within 800 ms).
+            const HIDE_DX: u16 = 25;
+            const SHOW_DX: u16 = 30;
+            if let Gesture::Down(_) = g {
+                self.sp.edge_x0 = None;
+            }
             match g {
                 Gesture::Down(p) if su::wide() && p.x >= EDGE_X => {
                     let m = self.sp_model(now);
                     if !matches!(su::graph_press(&m, su::TAP_OFF, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16), su::Press::Marker(..)) {
+                        self.sp.edge_x0 = Some(p.x);
                         return Some(false);
                     }
+                }
+                Gesture::Down(p) if !su::wide() && p.x >= su::PANEL_X as u16 => self.sp.edge_x0 = Some(p.x),
+                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.sp.edge_x0.is_some() => {
+                    let x0 = self.sp.edge_x0.unwrap_or(0);
+                    if !su::wide() && p.x >= x0 + HIDE_DX {
+                        self.sp.edge_x0 = None;
+                        self.sp.pressed = 0;
+                        self.sp_set_wide(true, now);
+                        return Some(true);
+                    }
+                    if su::wide() && p.x + SHOW_DX <= x0 {
+                        self.sp.edge_x0 = None;
+                        self.sp_set_wide(false, now);
+                        return Some(true);
+                    }
+                    return Some(false);
                 }
                 Gesture::Tap(p) if su::wide() && p.x >= EDGE_X => return Some(false),
                 Gesture::SwipeLeft if su::wide() && crate::gesture::swipe_x0() >= EDGE_X => {
