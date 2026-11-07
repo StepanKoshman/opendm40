@@ -67,11 +67,13 @@ const STREAM_SPIN_US: u64 = 1000;
 /// alone has 44 K, PR #200): the largest 1 K step that leaves the 8 KiB
 /// SRAM floor (docs/native-boot.md "SRAM audit"). Debug builds with RAM-hungry features (dbg-touch
 /// 1.9 KB, acdc-trace 1.8 KB, acdc-meth 0.5 KB) give up 1 K samples each
-/// to stay above the 8 KiB SRAM floor.
+/// to stay above the 8 KiB SRAM floor; the digital phosphor (`dpo`) 7 K.
 pub const CAP: usize = (43
     - cfg!(feature = "dbg-touch") as usize
     - cfg!(feature = "acdc-trace") as usize
-    - cfg!(feature = "acdc-meth") as usize)
+    - cfg!(feature = "acdc-meth") as usize
+    // The digital phosphor's counts (src/scope_dpo.rs, 13 965 B).
+    - 7 * cfg!(feature = "dpo") as usize)
     * 1024;
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
@@ -411,7 +413,6 @@ impl Settings {
     }
 
     /// V/div at the x1 probe (the zoom applied).
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn vdiv1(&self) -> f32 {
         VSTEPS[self.vidx()]
     }
@@ -2216,7 +2217,6 @@ impl Scope {
         r
     }
 
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn sample_rate(&self) -> u32 {
         if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
     }

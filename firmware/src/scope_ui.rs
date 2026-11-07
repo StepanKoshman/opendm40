@@ -198,6 +198,61 @@ pub const COMBINED_TOP: i16 = 76;
 /// The drag / tap rect of the stock overlay (sec. 10.1).
 pub const INNER: Rect = rect(0, 15, PANEL_X, 290);
 
+// opendm40: the wide graph (owner 2026-11-07). A swipe right on the panel
+// hides it, a swipe left from the screen's right edge brings it back; the
+// graph's 10 divisions are then stretched over the whole width: graph
+// column fx (and its data, the column arrays, NCOL) stays, it is painted
+// on screen columns scol(fx)..scol(fx + 1) - 1 (1 or 2 px; a vertical line
+// or grid dot on the first one only). The page's items that are not
+// graph columns (tabs, overlays, popups) keep their places.
+static WIDE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Right frame column of the wide graph (the screen's last).
+const WIDE_R: i32 = 479;
+
+/// The wide graph is on.
+#[inline]
+pub fn wide() -> bool {
+    WIDE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set the wide graph; true if it changed (the page redraws all).
+pub fn set_wide(on: bool) -> bool {
+    WIDE.swap(on, core::sync::atomic::Ordering::Relaxed) != on
+}
+
+/// Screen x of graph column `fx` (0: the left frame, GW: the right one).
+#[inline]
+pub fn scol(fx: i16) -> i16 {
+    if wide() { ((fx as i32 * WIDE_R + GW as i32 / 2) / GW as i32) as i16 } else { GX + fx }
+}
+
+/// Graph column (0..=GW) painted at screen x.
+#[inline]
+pub fn lcol(x: i16) -> i16 {
+    if !wide() {
+        return x - GX;
+    }
+    let mut fx = ((x as i32 * GW as i32) / WIDE_R) as i16;
+    while fx < GW && scol(fx + 1) <= x {
+        fx += 1;
+    }
+    while fx > 0 && scol(fx) > x {
+        fx -= 1;
+    }
+    fx
+}
+
+/// The right frame column.
+#[inline]
+pub fn gr() -> i16 {
+    scol(GW)
+}
+
+/// The graph's touch rect (`INNER`; the wide graph: to the screen edge).
+pub fn inner() -> Rect {
+    if wide() { rect(0, 15, 480, 290) } else { INNER }
+}
+
 /// The right panel (owner 2026-11-02): four channel blocks, CH1, DMM (the
 /// CH2 trace), GEN (the generator trace), MATH, 74 px apart from y 24. A
 /// block: its title (name and scale, 26 px) over two magnifier buttons
@@ -557,10 +612,11 @@ impl Model {
         if self.wvdiv > 0.0 {
             fmt_div(out, self.wvdiv, self.unit());
         } else {
-            vdiv_text(out, self.vdiv);
+            vdiv_text(out, self.vdiv, self.unit());
         }
     }
-    /// Unit of the vertical values ("V", source DMM current rows "A").
+    /// Unit of the vertical values ("V"; "A": the DMM current rows, CH1
+    /// type Cur).
     pub fn unit(&self) -> &'static str {
         if self.amps { "A" } else { "V" }
     }
@@ -671,9 +727,9 @@ pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
     out.push(crate::dmm::format(&mut t, v, frac as u8)).push(P[i]).push(unit);
 }
 
-/// "1V", "200mV": the V/div label and unit.
-pub fn vdiv_text(out: &mut Buf, vdiv: u8) {
-    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push("V");
+/// "1V", "200mV": the V/div label and `unit` ("V" / "A").
+pub fn vdiv_text(out: &mut Buf, vdiv: u8, unit: &str) {
+    out.push(VDIV_LABELS[vdiv.min(21) as usize]).push(unit);
 }
 
 // ------------------------------------------------------------------ widgets
@@ -1101,6 +1157,9 @@ fn short_scale(t: &str) -> &str {
 /// Panel target k (`panel_rect`): a block's title or magnifier button.
 /// Pressed (`Model::pressed`): the stock pressed grey.
 pub fn panel_part(m: &Model, k: usize) {
+    if wide() {
+        return;
+    }
     let r = panel_rect(k);
     // A strip pass (lcd.rs "strip rendering") without its rows: no layout.
     if !lcd::rows_hit(r.y, r.y + r.h - 1) {
@@ -1205,7 +1264,10 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 pub const CELL_CH2: u8 = 0x02;
 
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
-    let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
+    // The wide bar's 95 px steps: 1 px apart, the cells as wide as the
+    // normal ones (94 px: "Freq:1.00kHz" unshortened).
+    let st = meas_step();
+    let r = rect(MEAS_X + st * i as i16, 302, if wide() { st - 1 } else { st - 2 }, 17);
     let (text, ch2) = match text.strip_prefix(CELL_CH2 as char) {
         Some(t) => (t, true),
         None => (text, false),
@@ -1235,9 +1297,18 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
 }
 
 /// The measurement cells: 4 from MEAS_X (the frame's column, >= 4 px from
-/// the screen edge) to the right frame, 2 px apart.
+/// the screen edge) to the right frame, 2 px apart; the wide graph: 5 to
+/// the screen's edge (96 / 95 px steps).
 const MEAS_X: i16 = if GX < 4 { 4 } else { GX };
-const MEAS_STEP: i16 = (GR - MEAS_X) / 4;
+
+/// Measurement cells in the bar.
+pub fn meas_cells() -> usize {
+    if wide() { 5 } else { 4 }
+}
+
+fn meas_step() -> i16 {
+    (if wide() { WIDE_R as i16 } else { GR } - MEAS_X) / meas_cells() as i16
+}
 
 /// Every top-bar element.
 pub fn top_bar(m: &Model) {
@@ -1251,6 +1322,9 @@ pub fn top_bar(m: &Model) {
 }
 
 pub fn panel(m: &Model) {
+    if wide() {
+        return;
+    }
     // The background first: the parts paint their own rects only, and a
     // popup (the MF box to x 413, CH1 / MATH) reaching into the panel
     // left its pixels in the gaps between them (owner 2026-11-03: the MF
@@ -1277,10 +1351,11 @@ pub fn chrome(m: &Model) {
 fn frame(m: &Model) {
     let top = m.top() as u16;
     let h = m.frame_h() as u16;
-    lcd::fill_rect(GX as u16, top, GW as u16 + 1, 1, C_FRAME);
-    lcd::fill_rect(GX as u16, top + h - 1, GW as u16 + 1, 1, C_FRAME);
+    let w = (gr() - GX) as u16 + 1;
+    lcd::fill_rect(GX as u16, top, w, 1, C_FRAME);
+    lcd::fill_rect(GX as u16, top + h - 1, w, 1, C_FRAME);
     lcd::fill_rect(GX as u16, top, 1, h, C_FRAME);
-    lcd::fill_rect(GR as u16, top, 1, h, C_FRAME);
+    lcd::fill_rect(gr() as u16, top, 1, h, C_FRAME);
 }
 
 // ------------------------------------------------------------------ markers
@@ -1384,7 +1459,10 @@ pub const CH2_LEVEL: u8 = 6;
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
 /// 401..412, frame at 413).
-const RIGHT_X: i16 = GR - 12;
+/// The right-edge markers' x (`gr()` - 12: the wide graph's edge too).
+fn right_x() -> i16 {
+    gr() - 12
+}
 
 /// Level markers in creation order with their level-item ids (CH1 zero 0,
 /// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
@@ -1401,7 +1479,7 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     // them is at that edge.
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks_top(m, &mut g);
-    let top_right = g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13);
+    let top_right = g.iter().any(|mk| mk.some() && mk.x + 12 > right_x() && mk.y < top + 13);
     let top_left = g.iter().any(|mk| mk.some() && mk.x < 13 && mk.y < top + 13);
     let y_min_l = if top_left { top + 13 } else { top + 1 };
     let level = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
@@ -1423,14 +1501,15 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
         }
     };
     let y_min = if top_right { top + 13 } else { top + 1 };
+    let rx = right_x();
     let right = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
         let fy = line_fy(h, row as i32);
         if fy < 0 {
-            Mark::new(RIGHT_X, y_min, fam, UP, sel, col)
+            Mark::new(rx, y_min, fam, UP, sel, col)
         } else if fy > h - 1 {
-            Mark::new(RIGHT_X, top + h - 13, fam, DOWN, sel, col)
+            Mark::new(rx, top + h - 13, fam, DOWN, sel, col)
         } else {
-            Mark::new(RIGHT_X, (top + fy - 6).clamp(y_min, top + h - 13), fam, LEFT, sel, col)
+            Mark::new(rx, (top + fy - 6).clamp(y_min, top + h - 13), fam, LEFT, sel, col)
         }
     };
     // CH1 / math range is +-140 rows around the centre (the 280-row model).
@@ -1500,11 +1579,11 @@ fn left_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
 fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     let y = top + 1;
     if col < 12 {
-        Mark::new(GX + 1 + col.max(0), y, fam, LEFT, sel, colour)
+        Mark::new(scol(1 + col.max(0)), y, fam, LEFT, sel, colour)
     } else if col + 12 <= NCOL as i16 {
-        Mark::new(GX + 1 + col - 6, y, fam, DOWN, sel, colour)
+        Mark::new(scol(1 + col) - 6, y, fam, DOWN, sel, colour)
     } else {
-        Mark::new(GX + 1 + if col > NCOL as i16 { NCOL as i16 - 12 } else { col - 13 }, y, fam, RIGHT, sel, colour)
+        Mark::new(if col > NCOL as i16 { scol(NCOL as i16 + 1) - 12 } else { scol(1 + col) - 13 }, y, fam, RIGHT, sel, colour)
     }
 }
 
@@ -1546,7 +1625,10 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
 fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
-    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    // The trigger position's T in the trigger source's colour (CH1: the
+    // trace palette, as stock; CH2 / GEN: theirs), like the level marker.
+    let tc = if m.tsrc == crate::scope::TSRC_CH1 { m.pal() } else { trig_colour(m) };
+    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, tc);
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
@@ -1558,7 +1640,7 @@ fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
             // below the top marker row.
             let fy = trace_fy(m.frame_h(), row as i32);
             if (0..NCOL as i16).contains(&col) && fy >= 25 {
-                out[4] = Mark::new(GX + 1 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
+                out[4] = Mark::new(scol(1 + col) - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
             }
         }
     }
@@ -1613,7 +1695,7 @@ pub fn grab_rect(g: Rect, edge: u8) -> Rect {
     let along = (GRAB_H - 12) / 2;
     match edge {
         EDGE_LEFT => rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H),
-        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, GR + 1 - (g.x - GRAB_IN), GRAB_H),
+        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, gr() + 1 - (g.x - GRAB_IN), GRAB_H),
         _ => rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN),
     }
 }
@@ -1846,10 +1928,13 @@ impl Deco {
         };
         graph_marks(m, &mut d.marks);
         let ctr = d.trace;
+        // The trigger's guide lines (position and level): the trigger
+        // source's colour (CH1: the trace colour).
+        let tcol = if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) };
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: tcol }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
                 1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
@@ -1857,7 +1942,7 @@ impl Deco {
             }
             match m.sel_v {
                 0 if m.ch1_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.pos as i32), solid: true, col: ctr }),
-                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: if m.tsrc == crate::scope::TSRC_CH1 { ctr } else { trig_colour(m) } }),
+                1 => d.h[0] = Some(HLine { fy: line_fy(h, m.trig_row as i32), solid: false, col: tcol }),
                 2 if m.math_on => d.h[0] = Some(HLine { fy: line_fy(h, 140 + m.math_off as i32), solid: true, col: d.math }),
                 5 => {
                     if let Some(r) = m.runt_row {
@@ -1908,6 +1993,10 @@ pub struct Graph {
     pub px: u32,
     /// Trace-only flush resumes at this column (`FLUSH_BUDGET`).
     next: u16,
+    /// Digital phosphor (scope_dpo.rs): 0 off, 1 DPO (the trace colour's
+    /// brightness), 2 HOT (heat colours); CH1 is drawn from its counts.
+    pub dpo: u8,
+    d_dpo: u8,
 }
 
 /// Device: a flush that only moves traces (decoration and holes unchanged:
@@ -1963,6 +2052,8 @@ static mut GRAPH: Graph = Graph {
     d_holes: [None; NH],
     px: 0,
     next: 0,
+    dpo: 0,
+    d_dpo: 0,
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
@@ -2008,6 +2099,8 @@ pub fn init() {
     g.d_holes = [None; NH];
     g.px = 0;
     g.next = 0;
+    g.dpo = 0;
+    g.d_dpo = 0;
     init_shown();
 }
 
@@ -2016,7 +2109,7 @@ pub fn init() {
 #[inline(never)]
 fn init_shown() {
     unsafe {
-        core::ptr::addr_of_mut!(SHOWN).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] });
+        core::ptr::addr_of_mut!(SHOWN).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 5], cells_n: [0; 5] });
         core::ptr::addr_of_mut!(STRIP_SHOWN).write(None);
     }
 }
@@ -2233,16 +2326,30 @@ impl Graph {
             // CH1 off: no trace, no persistence (the record is still taken).
             self.tr = [EMPTY; NCOL];
             self.ps = [EMPTY; NCOL];
+            self.dpo = 0;
+        }
+        let dm = self.dpo;
+        if dm == 0 && crate::scope_dpo::any() {
+            crate::scope_dpo::discard();
         }
         self.deco = Deco::of(m);
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 {
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
             return;
         }
-        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
+        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh || dm != self.d_dpo;
+        // The phosphor's count -> colour table and a pixel's colour from it.
+        let dcol = if dm != 0 { crate::scope_dpo::colours(d.trace, dm == 2) } else { [C_FILL; 16] };
+        let dpx = |fx: i16, fy: i16| -> Option<Color> {
+            if dm == 0 {
+                return None;
+            }
+            let k = crate::scope_dpo::get((fx - 1) as usize, crate::scope_dpo::cell_of(fy));
+            if k == 0 { None } else { Some(dcol[k as usize]) }
+        };
         let h = d.fh;
         let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
@@ -2275,8 +2382,8 @@ impl Graph {
         // the topmost last), math, trace, persistence, the vertical line of
         // the column (`vcol`), horizontal lines, grid (`cm`: col_classes).
         type Rows = ((i16, i16), (i16, i16), (i16, i16), (i16, i16), (i16, i16));
-        let pix = |fx: i16, fy: i16, (tr, ps, ma, c2, gn): Rows, vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
-            let (sx, sy) = (GX + fx, d.top + fy);
+        let pix = |fx: i16, sx: i16, fy: i16, (tr, ps, ma, c2, gn): Rows, vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
+            let sy = d.top + fy;
             for &mi in mcol.iter().rev() {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
                     return c;
@@ -2293,6 +2400,9 @@ impl Graph {
             }
             if fy >= gn.0 && fy <= gn.1 {
                 return c_gen();
+            }
+            if let Some(c) = dpx(fx, fy) {
+                return c;
             }
             if fy >= ps.0 && fy <= ps.1 {
                 return d.half;
@@ -2337,11 +2447,17 @@ impl Graph {
                 return;
             }
             let fx = i as i16 + 1;
-            let sx = GX + fx;
+            // Its screen columns (one; the wide graph: one or two).
+            let (sx0, sx1) = (scol(fx), scol(fx + 1) - 1);
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
+            // The phosphor's changed cells (taken: a full column covers them).
+            let dsp = if dm != 0 { crate::scope_dpo::take(i) } else { None };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
+                if let Some(r) = dsp {
+                    sp.add(r);
+                }
                 for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i]), (self.gn[i], self.d_gn[i]), (self.c2[i], self.d_c2[i])] {
                     if a != b {
                         sp.add(a);
@@ -2350,7 +2466,7 @@ impl Graph {
                 }
                 if marks_changed {
                     for mk in d.marks.iter().chain(o.marks.iter()) {
-                        if mk.some() && sx >= mk.x && sx < mk.x + 12 {
+                        if mk.some() && sx1 >= mk.x && sx0 < mk.x + 12 {
                             sp.add((mk.y - d.top, mk.y - d.top + 11));
                         }
                     }
@@ -2358,7 +2474,7 @@ impl Graph {
                 // A hole that went away / moved: its rows come back.
                 for k in 0..NH {
                     if let Some(o) = self.d_holes[k].filter(|_| self.holes[k] != self.d_holes[k]) {
-                        if sx >= o.x && sx < o.x + o.w {
+                        if sx1 >= o.x && sx0 < o.x + o.w {
                             sp.add((o.y - d.top, o.y + o.h - 1 - d.top));
                         }
                     }
@@ -2375,81 +2491,88 @@ impl Graph {
                 continue;
             }
             let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
-            let vcol = vl(&d, fx);
-            // Markers over this column.
-            let mut mcol = [0usize; NGRAPH];
-            let mut nm = 0;
-            for (k, mk) in d.marks.iter().enumerate() {
-                if mk.some() && sx >= mk.x && sx < mk.x + 12 {
-                    mcol[nm] = k;
-                    nm += 1;
-                }
-            }
-            // Rows of this column under holes are not painted.
-            let mut cut = [(0i16, 0i16); 24];
-            let mut nc = 0;
-            for &(a, b) in sp.merged(1, h - 2) {
-                let mut segs = [(a, b); 12];
-                let mut ns = 1;
-                for r in self.holes.iter().flatten().filter(|r| sx >= r.x && sx < r.x + r.w) {
-                    let (ha, hb) = (r.y - d.top, r.y + r.h - 1 - d.top);
-                    let mut next = [(0i16, 0i16); 12];
-                    let mut nn = 0;
-                    for &(sa, sb) in &segs[..ns] {
-                        if sb < ha || sa > hb {
-                            next[nn] = (sa, sb);
-                            nn += 1;
-                            continue;
-                        }
-                        if sa < ha && nn < 12 {
-                            next[nn] = (sa, ha - 1);
-                            nn += 1;
-                        }
-                        if sb > hb && nn < 12 {
-                            next[nn] = (hb + 1, sb);
-                            nn += 1;
-                        }
-                    }
-                    segs = next;
-                    ns = nn;
-                }
-                for &sg in &segs[..ns] {
-                    if nc < cut.len() {
-                        cut[nc] = sg;
-                        nc += 1;
+            for sx in sx0..=sx1 {
+                // The wide graph's second px of a column: no vertical line or
+                // grid dot (only the centre row's line).
+                let shadow = sx != sx0;
+                let vcol = if shadow { None } else { vl(&d, fx) };
+                // Markers over this column.
+                let mut mcol = [0usize; NGRAPH];
+                let mut nm = 0;
+                for (k, mk) in d.marks.iter().enumerate() {
+                    if mk.some() && sx >= mk.x && sx < mk.x + 12 {
+                        mcol[nm] = k;
+                        nm += 1;
                     }
                 }
-            }
-            let cm = col_classes(fx);
-            // `pix` inline for the rows without a marker or a horizontal
-            // line: a full graph took 108 ms through the closure.
-            let vrow = vcol.map_or(0, |_| h - 4);
-            for &(a, b) in &cut[..nc] {
-                self.px += (b - a + 1) as u32;
-                // Never in a strip pass (a full graph there goes by rows,
-                // below; this loop has no columns then).
-                lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
-                for fy in a..=b {
-                    let rc = rows[fy as usize];
-                    lcd::data_panel(if nm > 0 || rc & R_LINE != 0 {
-                        pix(fx, fy, (tr, ps, ma, c2, gn), vcol, &mcol[..nm], cm)
-                    } else if fy >= ma.0 && fy <= ma.1 {
-                        d.math
-                    } else if fy >= tr.0 && fy <= tr.1 {
-                        d.trace
-                    } else if fy >= c2.0 && fy <= c2.1 {
-                        c_ch2()
-                    } else if fy >= gn.0 && fy <= gn.1 {
-                        c_gen()
-                    } else if fy >= ps.0 && fy <= ps.1 {
-                        d.half
-                    } else if fy & 1 == 1 && fy <= vrow {
-                        vcol.unwrap_or(C_FILL)
-                    } else if (rc | R_ALL) & cm != 0 {
-                        d.grid
-                    } else {
-                        C_FILL
-                    });
+                // Rows of this column under holes are not painted.
+                let mut cut = [(0i16, 0i16); 24];
+                let mut nc = 0;
+                for &(a, b) in sp.merged(1, h - 2) {
+                    let mut segs = [(a, b); 12];
+                    let mut ns = 1;
+                    for r in self.holes.iter().flatten().filter(|r| sx >= r.x && sx < r.x + r.w) {
+                        let (ha, hb) = (r.y - d.top, r.y + r.h - 1 - d.top);
+                        let mut next = [(0i16, 0i16); 12];
+                        let mut nn = 0;
+                        for &(sa, sb) in &segs[..ns] {
+                            if sb < ha || sa > hb {
+                                next[nn] = (sa, sb);
+                                nn += 1;
+                                continue;
+                            }
+                            if sa < ha && nn < 12 {
+                                next[nn] = (sa, ha - 1);
+                                nn += 1;
+                            }
+                            if sb > hb && nn < 12 {
+                                next[nn] = (hb + 1, sb);
+                                nn += 1;
+                            }
+                        }
+                        segs = next;
+                        ns = nn;
+                    }
+                    for &sg in &segs[..ns] {
+                        if nc < cut.len() {
+                            cut[nc] = sg;
+                            nc += 1;
+                        }
+                    }
+                }
+                let cm = if shadow { R_CY } else { col_classes(fx) };
+                // `pix` inline for the rows without a marker or a horizontal
+                // line: a full graph took 108 ms through the closure.
+                let vrow = vcol.map_or(0, |_| h - 4);
+                for &(a, b) in &cut[..nc] {
+                    self.px += (b - a + 1) as u32;
+                    // Never in a strip pass (a full graph there goes by rows,
+                    // below; this loop has no columns then).
+                    lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
+                    for fy in a..=b {
+                        let rc = rows[fy as usize];
+                        lcd::data_panel(if nm > 0 || rc & R_LINE != 0 {
+                            pix(fx, sx, fy, (tr, ps, ma, c2, gn), vcol, &mcol[..nm], cm)
+                        } else if fy >= ma.0 && fy <= ma.1 {
+                            d.math
+                        } else if fy >= tr.0 && fy <= tr.1 {
+                            d.trace
+                        } else if fy >= c2.0 && fy <= c2.1 {
+                            c_ch2()
+                        } else if fy >= gn.0 && fy <= gn.1 {
+                            c_gen()
+                        } else if let Some(c) = dpx(fx, fy) {
+                            c
+                        } else if fy >= ps.0 && fy <= ps.1 {
+                            d.half
+                        } else if fy & 1 == 1 && fy <= vrow {
+                            vcol.unwrap_or(C_FILL)
+                        } else if (rc | R_ALL) & cm != 0 {
+                            d.grid
+                        } else {
+                            C_FILL
+                        });
+                    }
                 }
             }
         }
@@ -2463,10 +2586,11 @@ impl Graph {
             if !lcd::rows_hit(sy, sy) {
                 continue;
             }
+            // Holes over this row, in screen columns.
             let mut cuts = [(0i16, 0i16); NH];
             let mut ncut = 0;
             for o in self.holes.iter().flatten().filter(|o| sy >= o.y && sy < o.y + o.h) {
-                cuts[ncut] = (o.x - GX, o.x + o.w - GX - 1);
+                cuts[ncut] = (o.x, o.x + o.w - 1);
                 ncut += 1;
             }
             let mut mrow = [0usize; NGRAPH];
@@ -2477,7 +2601,7 @@ impl Graph {
                     nmr += 1;
                 }
             }
-            let in_hole = |fx: i16| cuts[..ncut].iter().any(|&(a, b)| fx >= a && fx <= b);
+            let in_hole = |x: i16| cuts[..ncut].iter().any(|&(a, b)| x >= a && x <= b);
             // Pixels without a marker on a row without a horizontal line
             // (most of a full graph in strips): `pix` inline, as the column
             // loop. The markers' columns: mlo..=mhi.
@@ -2489,38 +2613,44 @@ impl Graph {
                 mhi = mhi.max(d.marks[k].x + 11);
             }
             let vrow = r & 1 == 1 && r <= h - 4 && d.v.iter().any(|l| l.is_some());
-            let mut fx = 1i16;
-            while fx <= NCOL as i16 {
-                if in_hole(fx) {
-                    fx += 1;
+            // Screen columns of the graph columns 1..=NCOL (the wide graph:
+            // each graph column on one or two).
+            let wd = wide();
+            let (x0, x1) = (scol(1), scol(NCOL as i16 + 1) - 1);
+            let mut x = x0;
+            while x <= x1 {
+                if in_hole(x) {
+                    x += 1;
                     continue;
                 }
                 // The run up to the next hole.
-                let mut e = NCOL as i16;
+                let mut e = x1;
                 for &(a, _) in &cuts[..ncut] {
-                    if a > fx && a - 1 < e {
+                    if a > x && a - 1 < e {
                         e = a - 1;
                     }
                 }
-                self.px += (e - fx + 1) as u32;
+                self.px += (e - x + 1) as u32;
                 // A strip pass: straight into the strip's row.
-                let mut span = lcd::strip_span(sy, GX + fx, GX + e);
+                let mut span = lcd::strip_span(sy, x, e);
                 let mut out = lcd::Out::panel();
                 if let Some(sp) = span.as_deref_mut() {
-                    if !line && !vrow && (GX + e < mlo || GX + fx > mhi) {
+                    if !wd && !line && !vrow && dm == 0 && (e < mlo || x > mhi) {
                         // No marker, line or vertical line in the run: the
                         // inline rule over the columns, no index checks.
-                        band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d);
-                        fx = e + 1;
+                        let (fa, fe) = (x - GX, e - GX);
+                        band_run(sp, &self.tr[(fa - 1) as usize..fe as usize], &self.ps[(fa - 1) as usize..fe as usize], &self.ma[(fa - 1) as usize..fe as usize], (&self.c2[(fa - 1) as usize..fe as usize], &self.gn[(fa - 1) as usize..fe as usize]), &COLC[fa as usize..=fe as usize], r, rc, &d);
+                        x = e + 1;
                         continue;
                     }
                 }
                 if span.is_none() {
-                    lcd::set_window((GX + fx) as u16, sy as u16, (GX + e) as u16, sy as u16);
+                    lcd::set_window(x as u16, sy as u16, e as u16, sy as u16);
                 }
-                for x in fx..=e {
-                    let i = (x - 1) as usize;
-                    let sx = GX + x;
+                for sx in x..=e {
+                    let fx = lcol(sx);
+                    let shadow = wd && sx != scol(fx);
+                    let i = (fx - 1) as usize;
                     let c = if !line && (sx < mlo || sx > mhi || !mrow[..nmr].iter().any(|&k| sx >= d.marks[k].x && sx < d.marks[k].x + 12)) {
                         let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
                         if r >= ma.0 && r <= ma.1 {
@@ -2531,11 +2661,13 @@ impl Graph {
                             c_ch2()
                         } else if r >= gn.0 && r <= gn.1 {
                             c_gen()
+                        } else if let Some(c) = dpx(fx, r) {
+                            c
                         } else if r >= ps.0 && r <= ps.1 {
                             d.half
-                        } else if let Some(c) = if vrow { vl(&d, x) } else { None } {
+                        } else if let Some(c) = if vrow && !shadow { vl(&d, fx) } else { None } {
                             c
-                        } else if (rc | R_ALL) & COLC[x as usize] != 0 {
+                        } else if (rc | R_ALL) & (if shadow { R_CY } else { COLC[fx as usize] }) != 0 {
                             d.grid
                         } else {
                             C_FILL
@@ -2549,17 +2681,19 @@ impl Graph {
                                 nm += 1;
                             }
                         }
-                        pix(x, r, (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]), vl(&d, x), &mcol[..nm], col_classes(x))
+                        pix(fx, sx, r, (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]), if shadow { None } else { vl(&d, fx) }, &mcol[..nm], if shadow { R_CY } else { col_classes(fx) })
                     };
                     match span.as_deref_mut() {
-                        Some(sp) => sp[(x - fx) as usize] = c,
+                        Some(sp) => sp[(sx - x) as usize] = c,
                         None => out.px(c),
                     }
                 }
-                fx = e + 1;
+                x = e + 1;
             }
         }
         self.next = 0;
+        crate::scope_dpo::done();
+        self.d_dpo = dm;
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_ma = self.ma;
@@ -2575,7 +2709,7 @@ impl Graph {
     /// as the stock FFT label). Uses the last flushed decoration.
     pub fn bg_at(&self, x: i16, y: i16) -> Color {
         let d = self.d_deco;
-        let (fx, fy) = (x - GX, y - d.top);
+        let (fx, fy) = (lcol(x), y - d.top);
         let h = d.fh;
         if fx < 1 || fx > NCOL as i16 || fy < 1 || fy > h - 2 {
             return C_FILL;
@@ -2600,14 +2734,14 @@ impl Graph {
 struct Shown {
     m: Option<Model>,
     strip: [Mark; NSTRIP],
-    cells: [[u8; 16]; 4],
-    cells_n: [u8; 4],
+    cells: [[u8; 16]; 5],
+    cells_n: [u8; 5],
 }
 
 // On the device in SRAM (.dmabuf, NOLOAD, as GRAPH; region B audit #6:
 // no .data load image in region B); `init` sets it up.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] };
+static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 5], cells_n: [0; 5] };
 
 fn shown() -> &'static mut Shown {
     unsafe { &mut *core::ptr::addr_of_mut!(SHOWN) }
@@ -2638,10 +2772,10 @@ pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
         return;
     }
     lcd::fill_rect(GX as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
-    lcd::fill_rect(GR as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(gr() as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
     let g = graph();
     g.holes[H_POPUP] = Some(keep);
-    g.holes[H_REST] = Some(rect(GX, y1, GW + 1, 320 - y1));
+    g.holes[H_REST] = Some(rect(GX, y1, gr() - GX + 1, 320 - y1));
     // The MF popup reaches into the panel.
     panel(m);
     g.invalidate();
@@ -2656,7 +2790,7 @@ pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
 pub fn invalidate() {
     let s = shown();
     s.m = None;
-    s.cells_n = [255; 4];
+    s.cells_n = [255; 5];
     graph().invalidate();
 }
 
@@ -2669,7 +2803,7 @@ pub fn update(m: &Model) {
     if fresh {
         chrome(m);
         s.strip = [Mark::NONE; NSTRIP];
-        s.cells_n = [255; 4];
+        s.cells_n = [255; 5];
         graph().invalidate();
     }
     let o = old.filter(|_| !fresh);
@@ -2711,7 +2845,7 @@ pub fn update(m: &Model) {
         }
     }
     if d(pal) {
-        s.cells_n = [255; 4];
+        s.cells_n = [255; 5];
     }
     // Strip markers: repaint the rows of every marker that changed.
     let mut nm = [Mark::NONE; NSTRIP];
@@ -2881,7 +3015,7 @@ pub fn cells(m: &Model, texts: &[&str]) {
 /// check 2026-10-21: four cells in one pass took 12.3 ms).
 pub fn cells_step(m: &Model, texts: &[&str]) -> bool {
     let s = shown();
-    for i in 0..4 {
+    for i in 0..meas_cells() {
         let t = texts.get(i).copied().unwrap_or("--");
         let b = t.as_bytes();
         let n = b.len().min(16);
@@ -3010,7 +3144,7 @@ pub fn tabs_of(mode: u8, tb: u8, tb_max: u8, transient: bool, pressed: Option<bo
 /// Some(true) = slower, Some(false) = faster, None = no step there.
 pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
     match mode {
-        TAP_HALVES if INNER.has(x, y) => Some(x <= GX + GCX - 6),
+        TAP_HALVES if inner().has(x, y) => Some(x <= scol(GCX) - 6),
         TAP_CORNERS if ZONE_L.has(x, y) => Some(true),
         TAP_CORNERS if ZONE_R.has(x, y) => Some(false),
         _ => None,
@@ -3137,7 +3271,7 @@ const MF_TAB_W: i16 = 80;
 /// Values the popups show.
 #[derive(Clone, Copy)]
 pub struct PopVals {
-    pub meas: [u8; 4],
+    pub meas: [u8; crate::scope_meas::MAX_SEL],
     pub meas_n: u8,
     pub roll: bool,
     /// 0 OFF 1 MIN 2 1S 3 INF.
@@ -3171,10 +3305,15 @@ pub struct PopVals {
     /// docs/scope-gen-channel.md).
     pub tsrc: u8,
     pub gen_trace: bool,
+    /// CH1 type Cur (CH1 popup, Probe tab): the values in amperes.
+    pub cur: bool,
     /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// The multimeter's function as CH2's unit: 0 V, 1 A, 2 another one
+    /// (neither shown selected).
+    pub ch2_func: u8,
     /// MF > Measure: the next picked item measures CH2 (the Source cell).
     pub meas_src2: bool,
 }
@@ -3385,13 +3524,14 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             let (t, c) = if v.meas_src2 { ("CH2", c_ch2()) } else { ("CH1", C_YELLOW) };
             rbox_text(r, pc, 8, C_POP_TAB, C_POP_BG, sf::SC_F16, t, c);
             fill_c(rect(15, 171, 398, 40), pc, C_POP_BG);
-            for k in 0..v.meas_n.min(4) as usize {
-                let r = rect(16 + 57 * k as i16, 176, 55, 30);
+            // opendm40: 5 selected items (the wide graph shows the 5th).
+            for k in 0..v.meas_n.min(crate::scope_meas::MAX_SEL as u8) as usize {
+                let r = rect(16 + 54 * k as i16, 176, 52, 30);
                 let sel = v.meas[k];
                 let c = if crate::scope_meas::is_ch2(sel) { c_ch2() } else { C_YELLOW };
                 rbox_text(r, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, MEAS_NAMES[crate::scope_meas::item(sel) as usize % 20], c);
             }
-            rbox_text(rect(281, 176, 60, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
+            rbox_text(rect(288, 176, 56, 30), pc, 8, C_ORANGE, C_POP_BG, sf::SC_F16, "Clear", C_WHITE);
             rbox_text(rect(348, 176, 60, 30), pc, 8, C_PURPLE, C_POP_BG, sf::SC_F16, "Default", C_WHITE);
         }
         1 => {
@@ -3400,7 +3540,12 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
             option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
-            option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
+            // opendm40: DPO / HOT, the digital phosphor (scope_dpo.rs).
+            if crate::scope_dpo::ENABLED {
+                option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF", "DPO", "HOT"], 29, v.persist as usize);
+            } else {
+                option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
+            }
             mf_display_values(v);
             // opendm40: the computed generator trace.
             fill_c(rect(14, 161, 399, 50), pc, C_POP_BG);
@@ -3416,6 +3561,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             cb.push("Color: ").push(CH2_COLOUR_NAMES[ch2_colour_idx() as usize % (NPAL + 1)]);
             rbox_text(C2_COLOUR, pc, 8, c_ch2(), C_POP_BG, sf::SC_F16, cb.as_str(), c_ch2_ink());
             option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            option_list(C2_UNIT, pc, &["V", "A"], 44, v.ch2_func as usize);
             if v.ch2_on {
                 rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
                 rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
@@ -3445,7 +3591,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 crate::trigsoft::RUNT => {
                     fill_text(TP_LABEL, pc, C_POP_BG, sf::SC_F16, TP_LABEL, "2nd level:", C_FILL, 1, 0);
                     let mut b = Buf::new();
-                    fmt_v(&mut b, v.runt_v, "V");
+                    fmt_v(&mut b, v.runt_v, if v.cur { "A" } else { "V" });
                     fill_text(TP_COND, pc, C_POP_BG, sf::SC_F16, TP_COND, b.as_str(), C_ORANGE, 1, 0);
                     fill_text(TR_HINT, pc, C_POP_BG, sf::SC_F16, TR_HINT, "drag orange T", C_FILL, 1, 0);
                 }
@@ -3489,6 +3635,9 @@ pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
 pub const C2_LIST: Rect = rect(24, 233, 88, 24);
+/// MF > Display: CH2's unit V / A (the multimeter's function), right of
+/// its On / Off.
+pub const C2_UNIT: Rect = rect(120, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
@@ -3549,6 +3698,8 @@ pub enum MfHit {
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
+    /// MF > Display: CH2's unit, true = A (the multimeter follows).
+    Ch2Func(bool),
     /// MF > Display: the next CH2 colour.
     Ch2Colour,
     /// MF > Display: the next GEN trace colour.
@@ -3589,10 +3740,10 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                     MfHit::Inside
                 };
             }
-            let k = ((x - 15) / 57).max(0);
-            if x < 278 {
-                if k < v.meas_n.min(4) as i16 { MfHit::SelCell(k as u8) } else { MfHit::Inside }
-            } else if x < 345 {
+            let k = ((x - 15) / 54).max(0);
+            if x < 286 {
+                if k < v.meas_n.min(crate::scope_meas::MAX_SEL as u8) as i16 { MfHit::SelCell(k as u8) } else { MfHit::Inside }
+            } else if x < 346 {
                 MfHit::Clear
             } else {
                 MfHit::Default
@@ -3601,7 +3752,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
         1 => {
             if let Some(i) = option_hit(rect(24, 81, 88, 24), 2, 44, x, y) {
                 MfHit::Roll(i == 0)
-            } else if let Some(i) = option_hit(rect(24, 125, 176, 24), 4, 44, x, y) {
+            } else if let Some(i) = if crate::scope_dpo::ENABLED { option_hit(rect(24, 125, 176, 24), 6, 29, x, y) } else { option_hit(rect(24, 125, 176, 24), 4, 44, x, y) } {
                 MfHit::Persist(i)
             } else if rect(204, 75, 210, 36).has(x, y) {
                 MfHit::Bright
@@ -3611,6 +3762,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::GenTrace(i == 0)
             } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
                 MfHit::Ch2(i == 0)
+            } else if let Some(i) = option_hit(C2_UNIT, 2, 44, x, y) {
+                MfHit::Ch2Func(i == 1)
             } else if v.ch2_on && near(C2_MINUS) {
                 MfHit::Ch2Step(false)
             } else if v.ch2_on && near(C2_PLUS) {
@@ -3695,10 +3848,12 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
         1 => {
             let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
-            // Stock also shows "Type Vol / Cur" here; it changes nothing
-            // (opendm40 reads the Wave view's current from the DMM), so it
-            // is left out.
             spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            // Stock's "Type Vol / Cur" (owner 2026-11-04): Cur shows CH1's
+            // values in amperes (the probe scale: A per volt at the input).
+            let r = rect(SX + 79, 224, 120, 24);
+            fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Type", C_BAR, 8, 0);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &["Vol", "Cur"], 44, v.cur as usize);
         }
         _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
@@ -3736,6 +3891,8 @@ pub enum SideHit {
     /// CH1: coupling 0 DC 1 AC.
     Coupling(u8),
     Probe(u8),
+    /// CH1: type 0 Vol 1 Cur.
+    Type(u8),
     Colour(u8),
     /// Math popup: mode 5 FFT / 6 ABS, colour, Hz/div choice, window, unit
     /// (1 = Vrms).
@@ -3774,7 +3931,10 @@ pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
     }
     match tab {
         0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        1 => match spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y) {
+            Some(i) => SideHit::Probe(i),
+            None => option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Type),
+        },
         _ => spinner_hit(rect(SX + 84, 70, 110, 150), NPAL, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
@@ -4240,7 +4400,7 @@ pub fn pm(x: i16, y: i16, c: Color) {
 /// zoom-in button).
 pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
     let (x, y) = (x as i16, y as i16);
-    if x < PANEL_X {
+    if x < PANEL_X || wide() {
         return None;
     }
     let mut best: Option<(i16, usize)> = None;

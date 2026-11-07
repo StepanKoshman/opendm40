@@ -1334,7 +1334,11 @@ in the left or right half of the graph steps), **Off**.
 - Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
-    readings, not the hardware.
+    readings, not the hardware. **Type**: **Vol** (volts) or **Cur**
+    (amperes, for a current probe or shunt: the probe factor then means
+    amperes per volt at the input, so ×10 reads a 100 mV/A clamp). With
+    **Cur** the CH1 V/div, the trigger level, the measurements, the cursors
+    and the CSV are in A (Ip-p, Imax ...). Kept over a restart.
   - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Tap the **CH1** title again with the popup open to hide CH1: no trace and
   no **A** marker, the block dimmed. CH1 is still recorded, so the trigger
@@ -1561,8 +1565,23 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
+HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Wide graph.** A swipe right on the right panel hides it: the graph's 10
+divisions stretch over the whole screen and the measurement bar gets a 5th
+cell. A swipe left from the screen's right edge brings the panel back (a
+press on the trigger level marker there still drags it). The combined view
+keeps the panel; the setting is not kept over a restart. MF > Measure takes
+up to 5 items; the normal bar shows the first 4.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
+1 column x 4 rows: bright where the trace runs in most frames, dim where it
+went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour
+in 12 brightness steps, **HOT** blue (rare) to red (always). The count fades
+by a step every 16 frames. A drag, a pinch, a settings change, roll and STOP
+show the plain trace and start the count over. The scope record is 7 K
+samples shorter in this build (36 K) for the counts' memory.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
@@ -1581,6 +1600,12 @@ measurements. Its zero line has a **2** marker on the left: drag
 it up or down to move the trace (double tap: back to the centre); the
 position is kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
+**V** / **A** choice beside **On** / **Off** on the Display tab sets CH2's
+unit and puts the multimeter into that function (V, or AC A) in one tap: V
+and A keep their last DC / AC coupling, except AC+DC and AUTO, which CH2
+cannot stream (V goes to DC, A to AC), and the power meter is left. Neither is
+selected while the multimeter is in another function. It does nothing in the
+Wave view or while a recording runs. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
@@ -1611,7 +1636,7 @@ While it is on, the edge trigger does not use the trigger hardware.
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+the probe tip (with CH1 type **Cur**: `time_s,amperes`, amperes). A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder

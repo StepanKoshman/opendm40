@@ -56,6 +56,7 @@ mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
+mod scope_dpo;
 mod scope_ch2;
 mod fft;
 mod sinc;
@@ -279,6 +280,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             .product("DM40 multimeter (opendm40)")
             .serial_number(uid::serial())])
         .unwrap()
+        // Windows caches "no MS OS descriptors" per VID:PID:release, so the
+        // release moved with them (usbtmc.rs MS_OS_20_SET).
+        .device_release(0x0417)
         .build();
     // build() enabled the core; now force the GD32 power/VBUS bits.
     usb::force_power_no_vbus();
@@ -807,7 +811,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapDisMs(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_dis_ms(k);
@@ -818,7 +821,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapJumpN(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_jumpn(k);
@@ -829,7 +831,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapDisEnd(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_dis_end(k);
@@ -840,7 +841,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapDisMode(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_dismode(k);
@@ -851,7 +851,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapDisRef(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_disref(k);
@@ -862,7 +861,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapIdis(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_idis(k);
@@ -873,7 +871,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::CapClass(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_class(k);
@@ -884,7 +881,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Cap => {
                         scpi.len = 0;
                         for (i, v) in app.dmm.cap_info().iter().enumerate() {
@@ -895,7 +891,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         true
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;
@@ -911,7 +906,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         put_u32(&mut scpi, (conv + 0.5) as u32);
                         true
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Idle(set) => {
                         app.dbg_idle(set, now, scpi);
                         set.is_none()
@@ -978,7 +972,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         false
                     }
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Drag(v) => {
                         let (p0, p1) = (touch::Point { x: v[0], y: v[1] }, touch::Point { x: v[2], y: v[3] });
                         gestures.synth_drag(p0, p1, v[4], v[5], v[6], now, |g| app.gesture(&mut clk, g));
@@ -1036,7 +1029,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                     #[cfg(not(feature = "dbg-diag"))]
                     scpi::Dbg::Diag => false,
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Flash => {
                         scpi.len = 0;
                         let mut t = [0u8; 16];
@@ -1062,21 +1054,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         false
                     }
-                    // Without the feature `dbg-dev` never parsed (scpi.rs).
-                    #[cfg(not(feature = "dbg-dev"))]
-                    scpi::Dbg::Drag(_)
-                    | scpi::Dbg::Flash
-                    | scpi::Dbg::Isr
-                    | scpi::Dbg::Fast
-                    | scpi::Dbg::Cap
-                    | scpi::Dbg::CapClass(_)
-                    | scpi::Dbg::CapIdis(_)
-                    | scpi::Dbg::CapDisMode(_)
-                    | scpi::Dbg::CapDisRef(_)
-                    | scpi::Dbg::CapDisMs(_)
-                    | scpi::Dbg::CapJumpN(_)
-                    | scpi::Dbg::CapDisEnd(_)
-                    | scpi::Dbg::Idle(_) => false,
                     scpi::Dbg::Release => {
                         feeding = false;
                         false
@@ -1120,7 +1097,6 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     // DBG:HYSPI needs --features dbg-hyspi (scpi.rs refuses it).
                     #[cfg(not(feature = "dbg-hyspi"))]
                     scpi::Dbg::HySpi(..) | scpi::Dbg::HySpiWr(..) => false,
-                    #[cfg(feature = "dbg-dev")]
                     scpi::Dbg::Isr => {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
@@ -2513,11 +2489,19 @@ fn rec_scpi(scpi: &mut scpi::Scpi, l: scpi::Log) -> bool {
     false
 }
 
-/// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding):
-/// `Scpi::put_u32` (one copy; region B audit #11).
-#[inline(always)]
-fn put_u32(scpi: &mut scpi::Scpi, v: u32) {
-    scpi.put_u32(v);
+/// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding).
+fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
+    let mut t = [0u8; 10];
+    let mut i = t.len();
+    loop {
+        i -= 1;
+        t[i] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    scpi.put_bytes(&t[i..]);
 }
 
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller

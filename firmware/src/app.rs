@@ -311,7 +311,7 @@ pub struct App {
     relay_next: u64,
     /// Scope measurement items: stock ids, `scope_meas::CH2` set for the
     /// DMM channel's.
-    meas_sel: [u8; 4],
+    meas_sel: [u8; crate::scope_meas::MAX_SEL],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
     /// The DMM channel's results (CH2), by stock id as `meas_res`.
@@ -711,7 +711,7 @@ impl App {
             host_scope: false,
             anti_drop: true,
             relay_next: 0,
-            meas_sel: crate::scope_meas::DEFAULT_SEL,
+            meas_sel: [0, 10, 9, 11, 0],
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
             meas_res2: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -1588,7 +1588,6 @@ impl App {
     /// the host. The idle dim still runs on touches and keys alone, and host
     /// activity does not undim: nobody is necessarily looking at the screen,
     /// and a dimmed backlight costs the session nothing.
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn note_host_activity(&mut self, now: u64) {
         self.last_host = self.last_host.max(now);
     }
@@ -2310,7 +2309,8 @@ impl App {
         for i in 0..4 {
             p[9] |= (self.meas_sel[i] as u32) << (8 * i);
         }
-        p[10] = self.meas_n as u32;
+        // Bits 8..15: the 5th item (opendm40; older firmware reads min(4)).
+        p[10] = self.meas_n as u32 | (self.meas_sel[4] as u32) << 8;
         // v3 words (0 = default everywhere): p[11] bit 0 rails "Both always",
         // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
         // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
@@ -2557,12 +2557,12 @@ impl App {
         // The saved level row is at the saved scale: its volts from there.
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
-        let n = (p[10] as usize).min(4);
+        let n = (p[10] as usize & 0xff).min(crate::scope_meas::MAX_SEL);
         // Only valid measurement ids (0..19, index into meas_res.v, with or
         // without the CH2 flag), no duplicates (review 7389e8a L1).
         let mut k = 0;
         for i in 0..n {
-            let id = (p[9] >> (8 * i)) as u8;
+            let id = if i < 4 { (p[9] >> (8 * i)) as u8 } else { (p[10] >> 8) as u8 };
             if crate::scope_meas::valid(id) && !self.meas_sel[..k].contains(&id) {
                 self.meas_sel[k] = id;
                 k += 1;
@@ -4808,7 +4808,6 @@ impl App {
     /// channels' tuning replies): region C (link-native.x), out of
     /// `scpi_dmm`'s frame.
     #[inline(never)]
-    #[cfg(feature = "dbg-dev")]
     fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         match cmd {
@@ -5098,17 +5097,14 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgReadout => {
                 // Emulator tests (ohmhunt, autowaittest, switchtest): what
                 // the DMM readout draws now, whatever the view.
@@ -5145,7 +5141,6 @@ impl App {
                 }
                 app_touchtest::tc_scpi(op, out)
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgView => {
                 // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;
@@ -5157,7 +5152,6 @@ impl App {
                 crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgGest => {
                 // n;target,axis,delta,ms;... oldest first.
                 crate::put_u32(out, self.gest_n as u32);
@@ -5226,12 +5220,10 @@ impl App {
                 out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(Some(v)) => {
                 self.dmm.set_sent_variant(clk, v);
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
                 true
@@ -5254,7 +5246,6 @@ impl App {
                 out.put_u32(self.volume as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgAlarm => {
                 let a = &self.alarm;
                 for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
@@ -5287,19 +5278,15 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(Some(ms)) => {
                 self.dmm.precond_ms = ms;
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(None) => {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5653,7 +5640,6 @@ impl App {
             }
             // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
-            #[cfg(feature = "dbg-dev")]
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;
                 let put_i = |out: &mut crate::scpi::Scpi, v: i64| {

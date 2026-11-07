@@ -5,7 +5,151 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.20-S2084 (2026-11-07)
+
+On v0.4.19-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### Changed
+
+- **Diode: the resistance stays readable under the SHORT / BEEP band.** The
+  green beeper band over the aux row hid the diode's resistance reading
+  (top right); it is now drawn on the band in its orange, right of the
+  SHORT / BEEP text, and follows the reading.
+
+Кратко: в режиме диода сопротивление справа вверху видно оранжевым поверх
+зелёной полосы SHORT / BEEP.
+
+## v0.4.19-S2084 (2026-11-07)
+
+On v0.4.18-S2084: the scope's panel hides for a wider graph. A test build
+of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not
+an official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **Wide graph: swipe the right panel away.** In the scope view a swipe
+  right on the channel panel (CH1 / DMM / GEN / FFT; 25 px of travel are
+  enough) hides it; the graph's
+  10 divisions then stretch over the whole screen (48 px instead of 39 per
+  division: some columns are 2 px wide). A swipe left from the screen's
+  right edge brings the panel back. The trigger level marker there still
+  drags as before. Not kept over a restart; the combined DMM + scope view
+  keeps the panel.
+- **A 5th automatic measurement.** MF > Measure takes up to 5 items; the
+  wide graph's measurement bar shows all 5, the normal bar the first 4.
+  Kept over a restart.
+
+Кратко: свайп вправо по правой панели осциллографа скрывает её, и 10
+делений растягиваются на весь экран; свайп влево от правого края экрана
+возвращает панель. В MF > Measure можно выбрать 5 измерений, в широком
+режиме видны все 5.
+
+## v0.4.18-S2084 (2026-11-07)
+
+On v0.4.17-S2084: a digital phosphor for CH1. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **Digital phosphor: MF > Display > Persist DPO / HOT.** CH1 is drawn as a
+  hit count per graph cell (1 column x 4 rows): where the trace runs in most
+  frames it is bright, where it went once in a while it is dim, so jitter,
+  noise and a rare runt show how often they happen. **DPO**: CH1's colour in
+  12 brightness steps; **HOT**: blue (rare) .. red (always). The counts are
+  logarithmic and fade by a step every 16 frames (about 0.3 s at 50 frames/s,
+  longer on slow timebases), so a change of the signal fades out within some
+  seconds. A drag, a pinch, a settings change, roll and STOP show the plain
+  trace and start the count over. Kept over a restart.
+- **The cost:** the scope record is 7 K samples shorter (36 K instead of
+  43 K; on the slow timebases' packed record 55 688 samples instead of
+  65 520), which pays for the 14 KB of counts.
+
+Кратко: цифровой люминофор для CH1 (MF > Display > Persist **DPO** — яркость
+цвета канала, **HOT** — синий → красный по частоте попаданий). Запись
+осциллографа короче на 7 K отсчётов (36 K вместо 43 K).
+
+## v0.4.17-S2084 (2026-11-06)
+
+On v0.4.16-S2084: USB works in a browser on Windows with no driver install. A
+build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40);
+not an official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **USBTMC with no driver on Windows.** The meter now carries MS OS 2.0
+  descriptors, so Windows binds WinUSB to the USBTMC interface by itself. WebUSB
+  pages, libusb and pyvisa-py open it without Zadig. The USB disk is not touched.
+  NI-VISA and Keysight users who want their own driver can still install it.
+
+## v0.4.16-S2084 (2026-11-04)
+
+On v0.4.15-S2084 (the code that ran on the meter): the scope's current unit
+and the DMM channel's unit. A build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release.
+
+### New
+
+- **CH1 type Vol / Cur** (CH1 popup > **Probe** > **Type**, back as in the
+  stock). **Cur** shows CH1 in amperes: the V/div, the trigger level badge,
+  the measurements (Ip-p, ...), the cursors, the math scale and the CSV
+  (`time_s,amperes`). The probe factor then means amperes per volt at the
+  input (x10 reads a 100 mV/A clamp). Kept over a restart.
+- **CH2 (DMM) unit V / A** (MF > **Display**, beside **On** / **Off**). A tap
+  puts the multimeter into that function: V, or AC A (DC-coupled, what CH2
+  can stream); AC+DC and AUTO, which CH2 cannot stream, become DC (V) or AC
+  (A), and the power meter is left. The trace restarts on the new row at once.
+  There are no watts here: the power meter measures P from two inputs one
+  after the other, so there is no waveform of P on one input.
+
+### Fixed
+
+- **The T marker at the top** (the trigger position) and **its vertical guide
+  line** take the colour of the trigger source (CH1, DMM / CH2, GEN) like the
+  level marker, its line and the badge; they were always CH1's colour.
+
+### Кратко по-русски
+
+- **CH1: Type Vol / Cur** (окно CH1 > Probe > Type, как в стоке): в режиме
+  **Cur** CH1 показан в амперах (V/div, уровень синхронизации, измерения,
+  курсоры, CSV). Множитель щупа тогда означает амперы на вольт на входе.
+- **Канал DMM (CH2): единица V / A** (MF > Display рядом с On / Off): касание
+  переключает и мультиметр (V или AC A). Ватт нет: ваттметр считает мощность
+  по очереди на двух входах, формы сигнала мощности на одном входе нет.
+- **Метка T сверху** (положение синхронизации) и **её вертикальная линия**
+  теперь цвета источника синхронизации (CH1, DMM, GEN), как метка уровня; были
+  всегда цвета CH1.
+
+## v0.4.15-S2084 (2026-11-03)
+
+Replaces v0.4.12-sk1, which froze after being installed on a meter and then
+restarted. A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40);
+not an official opendm40 release.
+
+### Fixed
+
+- **The freeze after installing v0.4.12-sk1, then a restart.** This build is
+  the code that ran on the meter before v0.4.12-sk1's last changes (the size
+  work called region B audit #11: the linker's merging of identical functions,
+  a second outliner pass, the CRC table, functions moved out of line). Those
+  changes are taken out; the cause inside them was not found. The features
+  are those of v0.4.12-sk1 below, nothing else is new. Region B has the 14.1 KB
+  free it had before that work.
+
+### Кратко по-русски
+
+- Заменяет v0.4.12-sk1: после установки она зависала и перезагружалась. Это
+  код, который работал на приборе до последних правок v0.4.12-sk1 (работа с
+  размером области B убрана, причину зависания в ней не искали). Функции те же,
+  что в v0.4.12-sk1 ниже.
+
 ## v0.4.12-sk1 (2026-11-03)
+
+**Withdrawn:** this build froze after installing and then restarted the
+meter; use v0.4.15-S2084.
 
 A build of [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40)
 on v0.4.0: the scope's DMM channel (CH2) as a full channel, colours, the ohm

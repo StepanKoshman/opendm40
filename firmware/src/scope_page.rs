@@ -165,6 +165,8 @@ struct Cache {
     ps_a: [(i16, i16); su::NCOL],
     ps_b: [(i16, i16); su::NCOL],
     ps_t: u64,
+    /// A fresh frame for `sp_render` (the digital phosphor counts it once).
+    fresh: bool,
 }
 
 // In SRAM (.dmabuf, NOLOAD) on the device (4.8 KB out of TCM); set up by
@@ -183,6 +185,7 @@ static mut CACHE: Cache = Cache {
     ps_a: [su::EMPTY; su::NCOL],
     ps_b: [su::EMPTY; su::NCOL],
     ps_t: 0,
+    fresh: false,
 };
 
 /// The shown frame's column rows (the decoder's bar, app_decode.rs).
@@ -213,6 +216,7 @@ pub(super) fn sp_init() {
     c.range = 8;
     c.tb = 13;
     c.ps_t = 0;
+    c.fresh = false;
     su::init();
     crate::scope_ch2::init();
 }
@@ -309,6 +313,9 @@ pub(super) struct Sp {
     /// CH1 hidden (owner 2026-11-03): a second tap on the CH1 block with
     /// its popup open, as stock math (`su::Model::ch1_on`).
     pub ch1_off: bool,
+    /// CH1 type Cur (CH1 popup > Probe > Type; owner 2026-11-04): CH1's
+    /// values, V/div, trigger level and measurements in amperes.
+    pub ch1_cur: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -320,6 +327,11 @@ pub(super) struct Sp {
     /// a whole engine column; the graph has su::GW px per COLS columns).
     hpos_rem: i32,
     pub swipes: bool,
+    /// The wide graph (the panel hidden by a swipe; su::wide).
+    pub wide: bool,
+    /// A touch that began on the panel / the wide graph's right edge: its
+    /// touch-down x (the panel's own swipe, by the drag's travel).
+    edge_x0: Option<u16>,
     pub press_fx: bool,
     pressed: u8,
     pressed_until: u64,
@@ -376,7 +388,7 @@ pub(super) struct Sp {
     /// The press picked the item that was already selected (a still tap
     /// then cycles to the next overlapping one, `sp_release`).
     presel: bool,
-    cur_saved: Option<([u8; 4], usize)>,
+    cur_saved: Option<([u8; crate::scope_meas::MAX_SEL], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
     pub math: Math,
@@ -398,6 +410,7 @@ impl Sp {
     pub const fn new() -> Sp {
         Sp {
             ch1_off: false,
+            ch1_cur: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -406,6 +419,8 @@ impl Sp {
             pinch: None,
             hpos_rem: 0,
             swipes: false,
+            wide: false,
+            edge_x0: None,
             press_fx: true,
             pressed: 0,
             pressed_until: 0,
@@ -539,7 +554,7 @@ impl App {
         if wave && s.tb <= scope::WAVE_TB_MIN {
             tabs &= !(su::TAB_SHOW_R | su::TAB_PRESS_R); // no faster wave timebase
         }
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         Model {
             status,
             tb: s.tb as u8,
@@ -611,6 +626,12 @@ impl App {
         }
     }
 
+    /// The unit of CH1's values: "A" in the Wave view's current rows and with
+    /// CH1 type Cur, else "V".
+    fn ch1_unit(&self) -> &'static str {
+        if if self.scope.wave_on() { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur } { "A" } else { "V" }
+    }
+
     /// Math pill second line: FFT dB/div, else the math V/div.
     fn math_scale(&self) -> su::Txt {
         let m = &self.sp.math;
@@ -618,7 +639,7 @@ impl App {
             su::Txt::new(su::FFT_DB[m.db.min(12) as usize])
         } else {
             let mut t = su::Txt::new(su::VDIV_LABELS[m.vdiv.min(21) as usize]);
-            t.push("V");
+            t.push(self.ch1_unit());
             t
         }
     }
@@ -710,6 +731,7 @@ impl App {
     /// Full page draw (after `redraw`).
     pub(super) fn sp_draw_static(&mut self) {
         self.sp.uncover = 0;
+        su::set_wide(self.sp_wide_on());
         su::invalidate();
         self.sp_draw_page();
     }
@@ -723,6 +745,7 @@ impl App {
 
     /// The page's graph rows from the cached frame (no drawing).
     pub(super) fn sp_prepare(&mut self) {
+        su::set_wide(self.sp_wide_on());
         // An open popup's box is drawn last: the graph leaves it alone.
         su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
         self.sp_render();
@@ -751,8 +774,28 @@ impl App {
         }
     }
 
+    /// The wide graph shown: wanted, in the scope view (not the combined
+    /// one).
+    fn sp_wide_on(&self) -> bool {
+        self.sp.wide && self.view == View::Scope
+    }
+
+    /// Hide (`on`) or bring back the right panel.
+    fn sp_set_wide(&mut self, on: bool, now: u64) {
+        self.beep(now, 30);
+        self.sp.wide = on;
+        self.redraw = true;
+    }
+
     /// Repaint whatever changed (model diff, graph rows).
     pub(super) fn sp_update(&mut self, now: u64) {
+        // The wide graph on / off: set here (the scope view's full redraw
+        // goes by App::repaint_strips, not sp_draw_static), then the whole
+        // page again.
+        if su::set_wide(self.sp_wide_on()) {
+            self.redraw = true;
+            return;
+        }
         let m = self.sp_model(now);
         su::update(&m);
         if self.sp.bubble && self.sp.bubble_dirty {
@@ -777,10 +820,10 @@ impl App {
     /// changed cell and return whether one was drawn.
     fn sp_cells_with(&mut self, one: bool) -> bool {
         let m = self.sp_model(self.now);
-        let mut b: [[u8; 24]; 4] = [[0; 24]; 4];
-        let mut n = [0usize; 4];
+        let mut b: [[u8; 24]; 5] = [[0; 24]; 5];
+        let mut n = [0usize; 5];
         let amps2 = crate::scope_ch2::store().scale().amps;
-        for i in 0..self.meas_n.min(4) {
+        for i in 0..self.meas_n.min(su::meas_cells()) {
             let sel = self.meas_sel[i];
             let id = crate::scope_meas::item(sel);
             let c2 = crate::scope_meas::is_ch2(sel);
@@ -804,11 +847,11 @@ impl App {
             n[i] = k;
         }
         let txt = |i: usize| core::str::from_utf8(&b[i][..n[i]]).unwrap_or("--");
-        let t: [&str; 4] = [txt(0), txt(1), txt(2), txt(3)];
+        let t: [&str; 5] = [txt(0), txt(1), txt(2), txt(3), txt(4)];
         if one {
-            return su::cells_step(&m, &t[..self.meas_n.min(4)]);
+            return su::cells_step(&m, &t[..self.meas_n.min(su::meas_cells())]);
         }
-        su::cells(&m, &t[..self.meas_n.min(4)]);
+        su::cells(&m, &t[..self.meas_n.min(su::meas_cells())]);
         false
     }
 
@@ -819,7 +862,8 @@ impl App {
         let s = self.scope.s;
         // Persistence: the previous frame joins the current layer (stock
         // 4.3); layers swap every period; off in roll and STOP.
-        let pm = if self.scope.rolling() || !s.run { 0 } else { self.sp.persist as usize };
+        // Persist DPO / HOT (4 / 5): no layers (the digital phosphor, sp_render).
+        let pm = if self.scope.rolling() || !s.run || self.sp.persist >= 4 { 0 } else { self.sp.persist as usize };
         if pm == 0 {
             c.ps_a = [su::EMPTY; su::NCOL];
             c.ps_b = [su::EMPTY; su::NCOL];
@@ -897,6 +941,7 @@ impl App {
         // The protocol decoder's band (app_decode.rs).
         self.dec_frame(f);
         self.sp_math_frame(f);
+        cache().fresh = true;
         self.sp_render();
     }
 
@@ -932,6 +977,21 @@ impl App {
                 (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
             };
         }
+        // The digital phosphor (Persist DPO / HOT): CH1 from its counts, fed
+        // with each fresh frame's rows; a preview (drag, pinch), roll and
+        // STOP show the plain trace (and forget the counts).
+        let fresh = core::mem::replace(&mut c.fresh, false);
+        let ident = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
+        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run { self.sp.persist - 3 } else { 0 };
+        if dm != 0 {
+            if fresh {
+                crate::scope_dpo::frame(&g.tr, h as i16);
+            }
+            g.tr = [su::EMPTY; su::NCOL];
+        } else if g.dpo != 0 {
+            crate::scope_dpo::clear();
+        }
+        g.dpo = dm;
         // ABS math follows CH1's columns (the FFT keeps its spectrum).
         if self.sp.math.on && self.sp.math.mode != 5 {
             self.sp_math();
@@ -989,7 +1049,7 @@ impl App {
         let mut t = [0u8; 16];
         h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
-        let amps = wave && self.scope.wave_scale_now().amps;
+        let amps = if wave { self.scope.wave_scale_now().amps } else { self.sp.ch1_cur };
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
@@ -1018,15 +1078,17 @@ impl App {
             scope::TrigMode::Single => crate::cold_str!("Single"),
         });
         h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
-        h.s(if wave {
-            if amps {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
-            } else {
-                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
-            }
+        // The shared start once (each long text is a copy in region C).
+        h.s(crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); "));
+        if wave {
+            h.s(crate::cold_str!("the value column is ")).s(if amps { crate::cold_str!("amperes through the DMM A jack") } else { crate::cold_str!("volts at the DMM jacks") });
+            h.s(crate::cold_str!(" (DMM calibration applied)\r\n"));
+        } else if amps {
+            // CH1 type Cur: the probe factor reads amperes per input volt.
+            h.s(crate::cold_str!("the value column is amperes (CH1 type Cur; probe factor = A per input volt)\r\n"));
         } else {
-            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
-        });
+            h.s(crate::cold_str!("volts at the probe tip\r\n"));
+        }
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, "CSV save failed", false);
@@ -1046,8 +1108,7 @@ impl App {
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
-                let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, runt_v, unit);
+                su::fmt_v(&mut b, runt_v, self.ch1_unit());
                 h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
@@ -1301,7 +1362,7 @@ impl App {
                 su::fmt_hz(&mut pk, pf);
                 pk.push(" ");
                 if m.vrms {
-                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), "V");
+                    su::fmt_v(&mut pk, crate::fft::db_to_v(pd), self.ch1_unit());
                 } else {
                     let mut t = [0u8; 16];
                     pk.push(crate::dmm::format(&mut t, pd, if pd.abs() < 99.95 { 1 } else { 0 })).push("dBV");
@@ -1332,6 +1393,7 @@ impl App {
         let c = cache();
         c.ps_a = [su::EMPTY; su::NCOL];
         c.ps_b = [su::EMPTY; su::NCOL];
+        crate::scope_dpo::clear();
     }
 
     /// Per main-loop pass on the scope page (from scope_poll): timers, the
@@ -1495,11 +1557,61 @@ impl App {
                 _ => {}
             }
         }
+        // opendm40 (owner 2026-11-07): the right panel hides with a swipe
+        // right on it and comes back with a swipe left from the screen's
+        // right edge (EDGE_X.., where no marker is grabbed: not a graph
+        // touch there, so its release is a swipe).
+        if self.view == View::Scope {
+            const EDGE_X: u16 = 466;
+            // The panel is 89 px wide: by the drag's travel (25 px right on
+            // the panel, 30 px left from the edge), not gesture.rs's swipe
+            // (60 px within 800 ms).
+            const HIDE_DX: u16 = 25;
+            const SHOW_DX: u16 = 30;
+            if let Gesture::Down(_) = g {
+                self.sp.edge_x0 = None;
+            }
+            match g {
+                Gesture::Down(p) if su::wide() && p.x >= EDGE_X => {
+                    let m = self.sp_model(now);
+                    if !matches!(su::graph_press(&m, su::TAP_OFF, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16), su::Press::Marker(..)) {
+                        self.sp.edge_x0 = Some(p.x);
+                        return Some(false);
+                    }
+                }
+                Gesture::Down(p) if !su::wide() && p.x >= su::PANEL_X as u16 => self.sp.edge_x0 = Some(p.x),
+                Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.sp.edge_x0.is_some() => {
+                    let x0 = self.sp.edge_x0.unwrap_or(0);
+                    if !su::wide() && p.x >= x0 + HIDE_DX {
+                        self.sp.edge_x0 = None;
+                        self.sp.pressed = 0;
+                        self.sp_set_wide(true, now);
+                        return Some(true);
+                    }
+                    if su::wide() && p.x + SHOW_DX <= x0 {
+                        self.sp.edge_x0 = None;
+                        self.sp_set_wide(false, now);
+                        return Some(true);
+                    }
+                    return Some(false);
+                }
+                Gesture::Tap(p) if su::wide() && p.x >= EDGE_X => return Some(false),
+                Gesture::SwipeLeft if su::wide() && crate::gesture::swipe_x0() >= EDGE_X => {
+                    self.sp_set_wide(false, now);
+                    return Some(false);
+                }
+                Gesture::SwipeRight if !su::wide() && crate::gesture::swipe_x0() >= su::PANEL_X as u16 => {
+                    self.sp_set_wide(true, now);
+                    return Some(false);
+                }
+                _ => {}
+            }
+        }
         match g {
             // A top-bar badge (before the graph area: INNER starts at y 15):
             // not captured, its release is the Tap below.
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
-            Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
+            Gesture::Down(p) if su::inner().has(p.x as i16, p.y as i16) => {
                 let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
                 // A marker grab zone: that marker along its own axis.
@@ -1673,7 +1785,8 @@ impl App {
             // refreshes as for any drag.
             self.sp.frozen = true;
         }
-        let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
+        // In graph columns (the wide graph: screen px over 1.23 columns).
+        let (mut dx, mut dy) = (su::lcol(p.x as i16) as i32 - su::lcol(t.applied.x as i16) as i32, p.y as i32 - t.applied.y as i32);
         (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
@@ -1957,7 +2070,7 @@ impl App {
             }
         };
         let rest = base.0[..base.1].iter().copied().filter(|id| !cur(id));
-        let mut sel = [0u8; 4];
+        let mut sel = [0u8; crate::scope_meas::MAX_SEL];
         let mut n = 0;
         let lead: &[u8] = match state {
             su::CUR_OFF => &XS,
@@ -1972,7 +2085,7 @@ impl App {
             self.sp.cur_saved = None;
         } else {
             for id in lead.iter().copied().chain(rest) {
-                if n < 4 {
+                if n < crate::scope_meas::MAX_SEL {
                     sel[n] = id;
                     n += 1;
                 }
@@ -2193,10 +2306,10 @@ impl App {
         if p.axis == Axis::H {
             b.push(su::TB_LABELS[p.i.min(29)]).push("/div");
         } else if self.scope.wave_on() {
-            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
+            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), self.ch1_unit());
             b.push("/div");
         } else {
-            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, "V");
+            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, self.ch1_unit());
             b.push("/div");
             if p.i < 2 {
                 b.push(" zoom"); // digital: range 0's codes stretched
@@ -2327,7 +2440,7 @@ impl App {
     /// The GEN block's scale ("1V", "500mV").
     fn gen_label(&self) -> su::Txt {
         let mut b = su::Buf::new();
-        su::vdiv_text(&mut b, self.gen_vdiv_idx());
+        su::vdiv_text(&mut b, self.gen_vdiv_idx(), "V");
         su::Txt::new(b.as_str())
     }
 
@@ -2391,8 +2504,10 @@ impl App {
             dec: self.dec_setup_vals(),
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
+            cur: self.sp.ch1_cur,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(),
+            ch2_func: self.ch2_func_idx(),
             meas_src2: self.meas_src2,
         }
     }
@@ -2686,8 +2801,8 @@ impl App {
             su::MfHit::Cell(i) => {
                 // The channel picked with the Source cell (opendm40).
                 let i = if self.meas_src2 { i | crate::scope_meas::CH2 } else { i };
-                // Refuse a duplicate or a 5th item silently (stock).
-                if self.meas_n < 4 && !self.meas_sel[..self.meas_n].contains(&i) {
+                // Refuse a duplicate or a 6th item silently (stock: 5th).
+                if self.meas_n < crate::scope_meas::MAX_SEL && !self.meas_sel[..self.meas_n].contains(&i) {
                     self.meas_sel[self.meas_n] = i;
                     self.meas_n += 1;
                     self.cursors_from_selection();
@@ -2714,7 +2829,7 @@ impl App {
                 self.cursors_from_selection();
             }
             su::MfHit::Default => {
-                self.meas_sel = crate::scope_meas::DEFAULT_SEL;
+                self.meas_sel[..4].copy_from_slice(&crate::scope_meas::DEFAULT_SEL);
                 self.meas_n = 4;
                 self.cursors_from_selection();
             }
@@ -2725,7 +2840,7 @@ impl App {
                 self.scope_set(st, now);
             }
             su::MfHit::Persist(i) => {
-                self.sp.persist = i.min(3);
+                self.sp.persist = i.min(if crate::scope_dpo::ENABLED { 5 } else { 3 });
                 self.sp_settings_changed();
             }
             su::MfHit::Rising(r) => {
@@ -2760,6 +2875,7 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::Ch2Func(amps) => self.ch2_func(clk, amps),
             su::MfHit::GenColour => {
                 // The next GEN colour: the whole page again (as CH2's).
                 su::set_gen_colour(su::gen_colour_idx() + 1);
@@ -2829,6 +2945,15 @@ impl App {
             su::SideHit::Probe(i) => {
                 st.probe = scope::PROBES[(i as usize).min(12)];
                 self.scope_set(st, now);
+            }
+            su::SideHit::Type(i) => {
+                if (i == 1) != self.sp.ch1_cur {
+                    self.sp.ch1_cur = i == 1;
+                    // The new unit on the V/div, the level badge, the
+                    // measurements and the frame's cursor readouts.
+                    self.scope.refresh();
+                    self.sp_settings_changed();
+                }
             }
             su::SideHit::Colour(i) => self.sp.colour = i.min(su::NPAL as u8 - 1),
             su::SideHit::MathMode(md) => {
@@ -3120,6 +3245,10 @@ impl App {
             | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             // Bit 13: CH1 hidden.
             | (self.sp.ch1_off as u32) << 13
+            // Bit 14: CH1 type Cur.
+            | (self.sp.ch1_cur as u32) << 14
+            // Bit 15: Persist DPO / HOT (p[11] bits 4..5 then 0 / 1).
+            | ((self.sp.persist >= 4) as u32) << 15
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
         // [5] bits 0..15: the CH2 (DMM) trace's position (i16 rows, 0 = centre).
@@ -3157,6 +3286,10 @@ impl App {
         self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
+        self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
+        if p[3] >> 15 & 1 != 0 && crate::scope_dpo::ENABLED {
+            self.sp.persist = 4 + (self.sp.persist & 1);
+        }
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
         su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));
