@@ -774,6 +774,44 @@ impl App {
         }
     }
 
+    /// The digital phosphor: up to DPO_MORE further triggered screens of
+    /// the record `f` was cut from (scope::dpo_next) light their cells
+    /// (scope_dpo::hit, not `main`): a 36 K record holds tens of screens on
+    /// the fast timebases and showed one. Graph column j: the samples
+    /// j * n / GW .. as the shown frame's columns; consecutive bars touch.
+    #[inline(never)] // .cold (link-native.x): the work is min_max / hit
+    fn sp_dpo_more(&mut self, f: &scope::Frame, r0: f32, slope: f32) {
+        const DPO_MORE: usize = 16;
+        let h = if self.view == View::DmmScope { 301 - su::COMBINED_TOP } else { 281 };
+        let n = f.data.len();
+        let gw = su::GW as usize;
+        let mut w = f.data;
+        for _ in 0..DPO_MORE {
+            let Some(nx) = self.scope.dpo_next(&w) else {
+                break;
+            };
+            let mut prev: Option<(i32, i32)> = None;
+            for j in 0..su::NCOL {
+                let a = j * n / gw;
+                let (cl, ch) = nx.min_max(a, ((j + 1) * n / gw).max(a + 1).min(n));
+                let (r1, r2) = ((r0 + slope * cl as f32) as i32, (r0 + slope * ch as f32) as i32);
+                let (lo, hi) = (r1.min(r2), r1.max(r2));
+                let (mut x, mut y) = (lo, hi);
+                if let Some((pa, pb)) = prev {
+                    x = x.min(pb);
+                    y = y.max(pa);
+                }
+                prev = Some((lo, hi));
+                // Off the graph: nothing (trace_fy clamps to its edge rows).
+                if y < 0 || x > 278 {
+                    continue;
+                }
+                crate::scope_dpo::hit(j, su::trace_fy(h as _, x), su::trace_fy(h as _, y), h as i16, false);
+            }
+            w = nx;
+        }
+    }
+
     /// The wide graph shown: wanted, in the scope view (not the combined
     /// one).
     fn sp_wide_on(&self) -> bool {
@@ -937,6 +975,11 @@ impl App {
         c.hpos = s.hpos;
         c.range = s.vidx();
         c.tb = s.tb;
+        // The digital phosphor is shown: the record's other triggered
+        // screens too (a rare event shows at once).
+        if su::graph().dpo != 0 && f.cols.is_none() && n >= scope::COLS {
+            self.sp_dpo_more(f, r0, slope);
+        }
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
         c.c2pos = self.ch2.pos;

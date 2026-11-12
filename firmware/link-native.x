@@ -379,6 +379,10 @@ SECTIONS
         *(.text.*8opendm405scope*9wave_exit*);
         *(.text.*8opendm405scope*9log_begin*);
         *(.text.*8opendm409scope_dpo5clear*);
+        /* The phosphor's further screens of a record: the loops' work is
+         * in region B (pack10::min_max, scope_dpo::hit, find_trigger). */
+        *(.text.*8opendm405scope*8dpo_next*);
+        *(.text.*11sp_dpo_more*);
         *(.text.*8opendm408scope_ui6mf_hit*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */

@@ -5,6 +5,31 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.22-S2084 (2026-11-12)
+
+On v0.4.21-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### Changed
+
+- **The phosphor catches rare events sooner.** A record holds tens of
+  screens on the fast timebases, and DPO / HOT added only the shown one.
+  Now up to 16 more triggered screens of every record light their cells
+  (edge trigger on CH1; not with a pulse / runt trigger or the GEN / DMM
+  source), so a glitch that is in one screen of twenty shows at once.
+- **The phosphor fades faster.** A trace that is gone took about 240 frames
+  to disappear; now about 40 (about a second). The count is linear now: the
+  shown frame adds one, every 4th frame a column loses a quarter (the
+  columns in four interleaved groups, so the fade is even). A part of the
+  trace hit in half of the frames is at half brightness; the rare parts are
+  dim and short-lived.
+- A cell is repainted only when its colour changes.
+
+Кратко: в фосфор (DPO / HOT) попадают все экраны записи, где сработала
+синхронизация (до 16 сверх показанного), поэтому редкие события видны сразу;
+исчезнувший след гаснет примерно за 40 кадров вместо 240.
+
 ## v0.4.21-S2084 (2026-11-12)
 
 On v0.4.20-S2084. A test build of

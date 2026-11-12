@@ -2382,6 +2382,28 @@ impl Scope {
         }
     }
 
+    /// The digital phosphor's further screens of one record: the next
+    /// triggered screen after `prev` (the frame just emitted or the screen
+    /// this returned before), at least a screen later, with the trigger
+    /// point at the same column. Edge trigger on CH1 only; None: no more
+    /// (or `prev` is not a part of the record: a roll / columns frame).
+    #[inline(never)] // .cold (link-native.x): the search itself is find_trigger
+    pub fn dpo_next(&self, prev: &Codes) -> Option<Codes> {
+        if self.s.ttype != 0 || self.gen_src() || self.ch2_src() || self.wave {
+            return None;
+        }
+        let rec = self.rec_view();
+        let at = rec.offset_of(prev)?;
+        let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
+        let lo = at + self.screen + pre;
+        let hi = (rec.len() + pre).checked_sub(self.screen)?;
+        if lo >= hi {
+            return None;
+        }
+        let t = self.find_trigger(rec.sub(lo, hi))? + lo;
+        Some(rec.sub(t - pre, t - pre + self.screen))
+    }
+
     /// The phosphor's tail is claimed (the page draws from its counts).
     pub fn dpo_mem(&self) -> bool {
         DPO_MEM.load(core::sync::atomic::Ordering::Relaxed)
