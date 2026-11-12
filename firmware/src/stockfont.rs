@@ -243,7 +243,6 @@ mod data {
         /// Coverage of row `y` (0..h) into buf[..w]. HUF walks forward from
         /// `c` (asking the same row again or any later row is cheap, an
         /// earlier one restarts from the top); the other formats ignore it.
-        #[inline(never)]
         pub fn row(&self, c: &mut Cur, y: u32, buf: &mut [u8; MAXW]) {
             let w = (self.w as usize).min(MAXW);
             match self.fmt {
@@ -551,8 +550,6 @@ fn twin_alpha(g: &Glyph, twin: i16, gx: u32, gy: u32) -> u8 {
     if t > 0 && gx >= t && gx - t < w { a.max(g.alpha(gx - t, gy)) } else { a }
 }
 
-// One copy for glyphs / glyphs_outlined / the others (flash: region B).
-#[inline(never)]
 fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Option<Placed>; MAXG]) -> usize {
     // Measure.
     let mut n = 0;
@@ -1014,7 +1011,6 @@ pub fn glyphs_outlined(font: Font, r: Rect, text: &str, fg: Color, ol: Color, bg
             }
         }
     }
-    let olr = ramp(ol, bg);
     let (bw, bh) = ((x1 - x0 + 1) as usize, (y1 - y0 + 1) as usize);
     // Only the ink's own box grown by the outline (the glyph boxes' empty
     // rows and columns are not painted: the text keeps its margins).
@@ -1049,7 +1045,7 @@ pub fn glyphs_outlined(font: Font, r: Rect, text: &str, fg: Color, ol: Color, bg
                     o = o.max(a[dy * CW + dx]);
                 }
             }
-            out.px(blend(fg, olr[o as usize], a[y * CW + x]));
+            out.px(blend(fg, blend(ol, bg, o), a[y * CW + x]));
         }
     }
     #[cfg(test)]
