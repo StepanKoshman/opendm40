@@ -2362,6 +2362,7 @@ impl Scope {
 
     /// Give BUF's tail to the phosphor (`on`) or back to the rings; a
     /// change empties the coded ring (its length) and the stored record.
+    #[inline(never)] // .cold (link-native.x): a Persist change only
     fn dpo_claim(&mut self, on: bool) {
         if DPO_K == 0 || DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) == on {
             return;
@@ -2879,6 +2880,7 @@ impl Scope {
 impl Scope {
     /// Source DMM on (the MCX acquisition stops; its settings are kept for
     /// `wave_exit`); the wave view's own settings come back.
+    #[inline(never)] // .cold (link-native.x): entering the wave view
     pub fn wave_enter(&mut self, sc: WaveScale, now: u64) {
         if self.wave {
             self.wave_scale(sc);
@@ -2903,6 +2905,7 @@ impl Scope {
 
     /// Back to the MCX source with its settings (the stored wave record is
     /// dropped: BUF belongs to the MCX acquisition again).
+    #[inline(never)] // .cold (link-native.x): leaving the wave view
     pub fn wave_exit(&mut self, now: u64) {
         if !self.wave {
             return;
@@ -2927,6 +2930,7 @@ impl Scope {
     /// above `fs` (at most LOG_FS_MAX). The front end stays as the scope
     /// set it. Returns the rate.
     #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
+    #[inline(never)] // .cold (link-native.x): the decoder's log starts
     pub fn log_begin(&mut self, fs: u32, now: u64) -> u32 {
         if !self.log {
             self.lend_buf();

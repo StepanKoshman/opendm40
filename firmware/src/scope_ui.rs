@@ -3716,6 +3716,7 @@ pub enum MfHit {
     Outside,
 }
 
+#[inline(never)] // .cold (link-native.x): a tap on the MF popup
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];

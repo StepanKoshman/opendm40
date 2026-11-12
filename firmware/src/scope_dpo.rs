@@ -146,6 +146,7 @@ pub fn cell_of(fy: i16) -> usize {
 
 /// Forget every count (settings changed, mode off); the columns that had
 /// any are repainted.
+#[inline(never)] // .cold (link-native.x): a settings change only
 pub fn clear() {
     if !ENABLED {
         return;

@@ -371,6 +371,15 @@ SECTIONS
          * (scope_ui::init_shown) and the backup-SRAM record set-up
          * (persist::init, also splash / setfile::boot). */
         *(.text.*8opendm408scope_ui10init_shown*);
+        /* opendm40 fork 0.4.21: rarely run scope code out of region B (a
+         * Persist change, entering / leaving the wave view, the decoder's
+         * log start, a tap on the MF popup). */
+        *(.text.*8opendm405scope*9dpo_claim*);
+        *(.text.*8opendm405scope*10wave_enter*);
+        *(.text.*8opendm405scope*9wave_exit*);
+        *(.text.*8opendm405scope*9log_begin*);
+        *(.text.*8opendm409scope_dpo5clear*);
+        *(.text.*8opendm408scope_ui6mf_hit*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
