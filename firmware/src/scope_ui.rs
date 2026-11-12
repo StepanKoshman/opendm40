@@ -3274,6 +3274,8 @@ pub struct PopVals {
     pub meas: [u8; crate::scope_meas::MAX_SEL],
     pub meas_n: u8,
     pub roll: bool,
+    /// Display > Hi-res.
+    pub hires: bool,
     /// 0 OFF 1 MIN 2 1S 3 INF.
     pub persist: u8,
     pub bright: u8,
@@ -3540,6 +3542,9 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
             option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
+            // opendm40: Hi-res (a column's mean instead of its min .. max).
+            fill_text(rect(116, 61, 88, 20), pc, C_POP_BG, sf::SC_F16, rect(116, 61, 88, 20), "Hi-res:", C_FILL, 1, 0);
+            option_list(rect(116, 81, 88, 24), pc, &["On", "Off"], 44, if v.hires { 0 } else { 1 });
             // opendm40: DPO / HOT, the digital phosphor (scope_dpo.rs).
             if crate::scope_dpo::ENABLED {
                 option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF", "DPO", "HOT"], 29, v.persist as usize);
@@ -3683,6 +3688,7 @@ pub enum MfHit {
     Clear,
     Default,
     Roll(bool),
+    HiRes(bool),
     Persist(u8),
     Bright,
     Grid,
@@ -3753,6 +3759,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
         1 => {
             if let Some(i) = option_hit(rect(24, 81, 88, 24), 2, 44, x, y) {
                 MfHit::Roll(i == 0)
+            } else if let Some(i) = option_hit(rect(116, 81, 88, 24), 2, 44, x, y) {
+                MfHit::HiRes(i == 0)
             } else if let Some(i) = if crate::scope_dpo::ENABLED { option_hit(rect(24, 125, 176, 24), 6, 29, x, y) } else { option_hit(rect(24, 125, 176, 24), 4, 44, x, y) } {
                 MfHit::Persist(i)
             } else if rect(204, 75, 210, 36).has(x, y) {

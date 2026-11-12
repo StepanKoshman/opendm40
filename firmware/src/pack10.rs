@@ -225,6 +225,21 @@ impl Codes {
         (o + w.len <= self.len).then_some(o)
     }
 
+    /// The mean code of a .. b, rounded (512 when empty): the scope's
+    /// Hi-res columns.
+    #[inline(never)]
+    pub fn mean(&self, a: usize, b: usize) -> u16 {
+        let b = b.min(self.len);
+        if a >= b {
+            return 512;
+        }
+        let mut s = 0u32;
+        for i in a..b {
+            s += self.at(i) as u32;
+        }
+        ((s + (b - a) as u32 / 2) / (b - a) as u32) as u16
+    }
+
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).
     #[inline(never)]
     pub fn min_max(&self, a: usize, b: usize) -> (u16, u16) {

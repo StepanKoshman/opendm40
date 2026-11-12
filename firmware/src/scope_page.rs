@@ -316,6 +316,9 @@ pub(super) struct Sp {
     /// CH1 type Cur (CH1 popup > Probe > Type; owner 2026-11-04): CH1's
     /// values, V/div, trigger level and measurements in amperes.
     pub ch1_cur: bool,
+    /// MF > Display > Hi-res: a column shows the mean of its samples, not
+    /// their min .. max (owner 2026-11-12).
+    pub hires: bool,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -411,6 +414,7 @@ impl Sp {
         Sp {
             ch1_off: false,
             ch1_cur: false,
+            hires: false,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -944,7 +948,14 @@ impl App {
             } else if n >= scope::COLS {
                 let a = i * n / scope::COLS;
                 let b = ((i + 1) * n / scope::COLS).max(a + 1).min(n);
-                let (cl, ch) = f.data.min_max(a, b);
+                // Hi-res: the mean of the column's samples (2 or more: the
+                // noise goes down with their number), else their span.
+                let (cl, ch) = if self.sp.hires && b - a >= 2 {
+                    let m = f.data.mean(a, b);
+                    (m, m)
+                } else {
+                    f.data.min_max(a, b)
+                };
                 let (r1, r2) = (row(cl), row(ch));
                 lo = r1.min(r2);
                 hi = r1.max(r2);
@@ -2519,6 +2530,7 @@ impl App {
             meas_n: self.meas_n as u8,
             roll: self.roll,
             persist: self.sp.persist,
+            hires: self.sp.hires,
             bright: self.sp.bright,
             grid: self.sp.grid,
             rising: s.rising,
@@ -2886,6 +2898,10 @@ impl App {
                 self.scope.roll = on;
                 // Stock: roll on with a slower index enters roll at 22.
                 self.scope_set(st, now);
+            }
+            su::MfHit::HiRes(on) => {
+                self.sp.hires = on;
+                self.sp_settings_changed();
             }
             su::MfHit::Persist(i) => {
                 self.sp.persist = i.min(if crate::scope_dpo::ENABLED { 5 } else { 3 });
@@ -3273,7 +3289,9 @@ impl App {
             | ((m.vdiv ^ d.vdiv) as u32 & 0x1F) << 10
             | (m.vrms as u32) << 15
             | ((m.win ^ d.win) as u32 & 7) << 16
-            | ((m.hz ^ d.hz) as u32 & 3) << 19;
+            | ((m.hz ^ d.hz) as u32 & 3) << 19
+            // Bit 21: Display > Hi-res.
+            | (self.sp.hires as u32) << 21;
         p[1] = ((m.fft_off - d.fft_off) as i16 as u16 as u32) | ((m.abs_off - d.abs_off) as i16 as u16 as u32) << 16;
         p[2] = m.ctr.to_bits();
         // [3] trigger type / pulse condition / runt row - default; [4] the
@@ -3335,6 +3353,7 @@ impl App {
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
+        self.sp.hires = p[0] >> 21 & 1 != 0;
         if p[3] >> 15 & 1 != 0 && crate::scope_dpo::ENABLED {
             self.sp.persist = 4 + (self.sp.persist & 1);
         }

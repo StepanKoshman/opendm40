@@ -5,6 +5,29 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.23-S2084 (2026-11-12)
+
+On v0.4.22-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### New
+
+- **Hi-res: MF > Display > Hi-res On / Off.** With several samples in a
+  screen column the trace shows their mean instead of the band from the
+  smallest to the largest: the noise goes down with the number of samples
+  in a column (20 samples: about 4.5 times), so the trace is thin and small
+  steps show. It works where a column has 2 samples or more (from about
+  2 us/div at 50 MS/s to the slow timebases); roll and the stopped record
+  zoomed out past its length keep the min .. max band. A spike shorter than
+  a column is averaged away: switch Hi-res off to look for glitches. The
+  measurements and the CSV use the samples as before. Kept over a restart.
+
+Кратко: MF > Display > Hi-res: колонка экрана показывает среднее своих
+отсчётов вместо полосы от минимума до максимума, шум на экране падает,
+линия тонкая. Короткие выбросы при этом усредняются: для поиска глитчей
+Hi-res выключают. Измерения и CSV считаются по отсчётам, как раньше.
+
 ## v0.4.22-S2084 (2026-11-12)
 
 On v0.4.21-S2084. A test build of

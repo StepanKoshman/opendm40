@@ -1565,8 +1565,14 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF, DPO,
-HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Hi-res** on / off; **Persist** OFF,
+MIN, 1S, INF, DPO, HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Hi-res** draws the mean of the samples in each screen column instead of
+the band from their smallest to their largest: less noise on the trace, the
+more samples a column has (2 or more; not in roll). A spike shorter than a
+column is averaged away, so switch it off to look for glitches. The
+measurements and the CSV are not changed by it.
 
 **Wide graph.** A swipe right on the right panel hides it: the graph's 10
 divisions stretch over the whole screen and the measurement bar gets a 5th

@@ -292,6 +292,7 @@ pub fn popvals(m: &Model) -> su::PopVals {
         meas: [0, 10, 9, 11, 0],
         meas_n: 4,
         roll: false,
+        hires: false,
         persist: 0,
         bright: 100,
         grid: 50,
