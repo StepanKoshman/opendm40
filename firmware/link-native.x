@@ -296,6 +296,7 @@ SECTIONS
         *(.text.*8opendm402ui18test_current_label*);
         /* The diode's aux2 on the beeper band: drawn on a change only. */
         *(.text.*8band_aux*);
+        *(.text.*9stockfont15glyphs_outlined*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);

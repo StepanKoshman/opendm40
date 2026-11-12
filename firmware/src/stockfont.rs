@@ -960,6 +960,98 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
     crate::probe::end();
 }
 
+/// `glyphs` with an outline: each ink pixel's 8 neighbours take `ol`
+/// (as strong as their ink), then the text in `fg` on top; only the text's
+/// box grown by 1 px is painted (on `bg`). The value on the DMM's beeper
+/// band (ui.rs band_aux: orange on green, outlined in black, owner
+/// 2026-11-12). Up to 126 x 28 px of text (else plain `glyphs`).
+#[inline(never)] // .cold (link-native.x): drawn on a change only
+pub fn glyphs_outlined(font: Font, r: Rect, text: &str, fg: Color, ol: Color, bg: Color, align: u8, spacing: i8) {
+    const CW: usize = 128;
+    const CH: usize = 30;
+    let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
+    let n = layout(font, r, text, align, spacing, &mut pl);
+    // The ink box (screen), grown by the outline's 1 px.
+    let (mut x0, mut y0, mut x1, mut y1) = (i16::MAX, i16::MAX, i16::MIN, i16::MIN);
+    for p in pl[..n].iter().flatten() {
+        if p.g.w == 0 || p.g.h == 0 {
+            continue;
+        }
+        x0 = x0.min(p.x - 1);
+        y0 = y0.min(p.y - 1);
+        x1 = x1.max(p.x + p.g.w as i16 + p.twin);
+        y1 = y1.max(p.y + p.g.h as i16);
+    }
+    if x0 > x1 {
+        return;
+    }
+    if (x1 - x0 + 1) as usize > CW || (y1 - y0 + 1) as usize > CH || x0 < 0 || y0 < 0 {
+        glyphs(font, r, text, fg, bg, align, spacing);
+        return;
+    }
+    if !lcd::rows_hit(y0, y1) {
+        return;
+    }
+    // The ink's coverage (0..15) over the box.
+    let mut a = [0u8; CW * CH];
+    for p in pl[..n].iter().flatten() {
+        if p.g.w == 0 || p.g.h == 0 {
+            continue;
+        }
+        let mut buf = [0u8; MAXW];
+        let mut cur = Cur::default();
+        let w = p.g.w as i16 + p.twin;
+        for gy in 0..p.g.h as u32 {
+            p.g.row(&mut cur, gy, &mut buf);
+            let y = (p.y - y0) as usize + gy as usize;
+            for gx in 0..w {
+                let v = twin_buf(&buf, p.g.w, p.twin, gx as usize);
+                let k = y * CW + (p.x - x0 + gx) as usize;
+                a[k] = a[k].max(v);
+            }
+        }
+    }
+    let (bw, bh) = ((x1 - x0 + 1) as usize, (y1 - y0 + 1) as usize);
+    // Only the ink's own box grown by the outline (the glyph boxes' empty
+    // rows and columns are not painted: the text keeps its margins).
+    let (mut ix0, mut iy0, mut ix1, mut iy1) = (bw, bh, 0, 0);
+    for y in 0..bh {
+        for x in 0..bw {
+            if a[y * CW + x] != 0 {
+                (ix0, iy0, ix1, iy1) = (ix0.min(x), iy0.min(y), ix1.max(x), iy1.max(y));
+            }
+        }
+    }
+    if ix0 > ix1 {
+        return;
+    }
+    let (ix0, iy0, ix1, iy1) = (ix0.saturating_sub(1), iy0.saturating_sub(1), (ix1 + 1).min(bw - 1), (iy1 + 1).min(bh - 1));
+    let Some((ya, yb)) = lcd::clip_rows(y0 + iy0 as i16, y0 + iy1 as i16) else {
+        return;
+    };
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
+    #[cfg(test)]
+    crate::probe::sub(0);
+    let (sx0, sx1) = (x0 + ix0 as i16, x0 + ix1 as i16);
+    lcd::set_window(sx0 as u16, ya as u16, sx1 as u16, yb as u16);
+    for sy in ya..=yb {
+        let y = (sy - y0) as usize;
+        let mut out = if sx1 < lcd::W as i16 { lcd::row_out(sy, sx0) } else { lcd::Out::panel() };
+        for x in ix0..=ix1 {
+            let mut o = 0u8;
+            for dy in y.saturating_sub(1)..=(y + 1).min(bh - 1) {
+                for dx in x.saturating_sub(1)..=(x + 1).min(bw - 1) {
+                    o = o.max(a[dy * CW + dx]);
+                }
+            }
+            out.px(blend(fg, blend(ol, bg, o), a[y * CW + x]));
+        }
+    }
+    #[cfg(test)]
+    crate::probe::end();
+}
+
 /// Width in pixels of `text` as `label` lays it out (pen advance plus the
 /// last glyph's width), e.g. to place a tag right before right-aligned text.
 pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {

@@ -5,6 +5,21 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.24-S2084 (2026-11-12)
+
+On v0.4.23-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### Changed
+
+- **Diode: the resistance on the SHORT / BEEP band is outlined in black**,
+  so the orange reads clearly on the green. The band is 1 px taller at the
+  top and at the bottom (y 37..64) to fit the outline.
+
+Кратко: сопротивление на зелёной полосе SHORT / BEEP в режиме диода
+обведено чёрным контуром; полоса стала на 2 px выше.
+
 ## v0.4.23-S2084 (2026-11-12)
 
 On v0.4.22-S2084. A test build of
