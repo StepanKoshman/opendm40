@@ -965,7 +965,7 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
 /// box grown by 1 px is painted (on `bg`). The value on the DMM's beeper
 /// band (ui.rs band_aux: orange on green, outlined in black, owner
 /// 2026-11-12). Up to 126 x 28 px of text (else plain `glyphs`).
-#[inline(never)] // region B: region C has no room left (0.4.24)
+#[inline(never)] // .cold (link-native.x): drawn on a change only
 pub fn glyphs_outlined(font: Font, r: Rect, text: &str, fg: Color, ol: Color, bg: Color, align: u8, spacing: i8) {
     const CW: usize = 128;
     const CH: usize = 30;
