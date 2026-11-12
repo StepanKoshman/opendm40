@@ -50,11 +50,9 @@ pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-1
 /// the stock RUN green (`gen_status`).
 pub const SHORT_BG: Color = 0x04A9;
 pub const SHORT_FG: Color = 0x07E0;
-/// The indicator's band over the aux row (y 37..64): 3 px under the status
-/// bar and above the digits' cells (68). opendm40: 1 px taller each way than
-/// the temperature chip (38..63), for the outlined diode value on it
-/// (`band_aux`: 20 px digits plus their 1 px outline, 3 px inside).
-pub const SHORT_RECT: sf::Rect = rect(8, 37, 464, 28);
+/// The indicator's band over the aux row (y 38..63, as the temperature
+/// chip): 4 px under the status bar and above the digits' cells (68).
+pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
 /// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
 /// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
 /// others (`set_short_style`, the PR's comparison).
@@ -700,8 +698,7 @@ impl DmmView {
     /// aux2 on the beeper indicator's band (`reading`): the value right-
     /// aligned in 285..396 (clear of the centred SHORT / BEEP, which ends
     /// at ~280), the unit from 403 to the band's rounded end, on the band's
-    /// green, outlined in black (owner 2026-11-12); drawn on a change
-    /// (`short_sync` forgets it).
+    /// green; drawn on a change (`short_sync` forgets it).
     #[inline(never)] // .cold (link-native.x): drawn on a change only
     fn band_aux(&mut self, v: &crate::dmm::Val, col: Color) {
         let mut t = [0u8; 16];
@@ -719,10 +716,10 @@ impl DmmView {
         let b = SHORT_RECT;
         sf::rbox(b, 6, SHORT_BG, BG);
         sf::glyphs(sf::ASCII26, b, if self.short_drawn == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
-        sf::glyphs_outlined(sf::F21, rect(285, b.y, 112, b.h), txt, col, 0x0000, SHORT_BG, 4, 0);
+        sf::glyphs(sf::F21, rect(285, b.y, 112, b.h), txt, col, SHORT_BG, 4, 0);
         let mut u = [0u8; 16];
         let ut = sf::unit_text(v.unit, &mut u);
-        sf::glyphs_outlined(sf::F21, rect(403, b.y, b.x + b.w - 7 - 403, b.h), ut, VALUE, 0x0000, SHORT_BG, 1, 0);
+        sf::glyphs(sf::F21, rect(403, b.y, b.x + b.w - 7 - 403, b.h), ut, VALUE, SHORT_BG, 1, 0);
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
