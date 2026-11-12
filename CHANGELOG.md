@@ -7,26 +7,51 @@ section named after the tag as the release notes; how to cut a release:
 
 ## v0.4.23-S2084 (2026-11-12)
 
-On v0.4.22-S2084. A test build of
-[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
-official opendm40 release. Not yet run on a real meter.
+The release of the test builds 0.4.18 .. 0.4.23 of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40) (on
+v0.4.17-S2084); not an official opendm40 release. Checked on the meter by
+the owner (2026-11-12). The per-build details: CHANGELOG.md, v0.4.18 .. v0.4.22.
 
 ### New
 
-- **Hi-res: MF > Display > Hi-res On / Off.** With several samples in a
-  screen column the trace shows their mean instead of the band from the
-  smallest to the largest: the noise goes down with the number of samples
-  in a column (20 samples: about 4.5 times), so the trace is thin and small
-  steps show. It works where a column has 2 samples or more (from about
-  2 us/div at 50 MS/s to the slow timebases); roll and the stopped record
-  zoomed out past its length keep the min .. max band. A spike shorter than
-  a column is averaged away: switch Hi-res off to look for glitches. The
-  measurements and the CSV use the samples as before. Kept over a restart.
+- **Digital phosphor: MF > Display > Persist DPO / HOT.** CH1 drawn as a
+  hit count per graph cell (1 column x 4 rows): bright where the trace runs
+  in most frames, dim where it went once in a while. DPO: CH1's colour in
+  12 steps; HOT: blue (rare) .. red (always). Up to 16 more triggered
+  screens of every record are added (edge trigger on CH1), so a rare event
+  shows at once; a trace that is gone fades in about 40 frames.
+- **Hi-res: MF > Display > Hi-res.** A screen column shows the mean of its
+  samples instead of their min .. max band: less noise, a thin trace. A
+  spike shorter than a column is averaged away (switch it off for
+  glitches); the measurements and the CSV are not changed by it.
+- **Wide graph.** A swipe right on the scope's right panel hides it and the
+  10 divisions stretch over the whole screen; a swipe left from the right
+  edge brings it back.
+- **A 5th automatic measurement**: MF > Measure takes up to 5 items, the
+  wide graph's bar shows all 5.
 
-Кратко: MF > Display > Hi-res: колонка экрана показывает среднее своих
-отсчётов вместо полосы от минимума до максимума, шум на экране падает,
-линия тонкая. Короткие выбросы при этом усредняются: для поиска глитчей
-Hi-res выключают. Измерения и CSV считаются по отсчётам, как раньше.
+### Changed
+
+- **The scope record:** the full depth (44 032 samples, 65 520 on the slow
+  timebases and in roll) everywhere the phosphor is not shown; with Persist
+  DPO / HOT 36 864 / 55 688 (the phosphor's counts use the end of the
+  record's memory then).
+- **Diode:** the resistance stays readable on the green SHORT / BEEP band,
+  in orange.
+- **Settings > Other > USB disk** (Files live / PC can edit) is kept over a
+  restart.
+
+### Notes
+
+- Flash is nearly full: region B has 9 400 B free (8 KiB floor), region C
+  4 824 B (4 KiB floor).
+- The `acdc-meth` and `memprobe` build variants (developer tools, never in a
+  shipped image) are not built by this fork's CI any more.
+
+Кратко: цифровой люминофор (Persist DPO / HOT), Hi-res, широкий график
+(свайп по правой панели), 5-е автоматическое измерение, полная глубина
+записи без DPO, сопротивление на полосе SHORT в режиме диода, режим USB-диска
+сохраняется после перезапуска.
 
 ## v0.4.22-S2084 (2026-11-12)
 
