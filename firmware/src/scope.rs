@@ -67,14 +67,40 @@ const STREAM_SPIN_US: u64 = 1000;
 /// alone has 44 K, PR #200): the largest 1 K step that leaves the 8 KiB
 /// SRAM floor (docs/native-boot.md "SRAM audit"). Debug builds with RAM-hungry features (dbg-touch
 /// 1.9 KB, acdc-trace 1.8 KB, acdc-meth 0.5 KB) give up 1 K samples each
-/// to stay above the 8 KiB SRAM floor; the digital phosphor (`dpo`) 7 K.
+/// to stay above the 8 KiB SRAM floor.
 pub const CAP: usize = (43
     - cfg!(feature = "dbg-touch") as usize
     - cfg!(feature = "acdc-trace") as usize
-    - cfg!(feature = "acdc-meth") as usize
-    // The digital phosphor's counts (src/scope_dpo.rs, 13 965 B).
-    - 7 * cfg!(feature = "dpo") as usize)
+    - cfg!(feature = "acdc-meth") as usize)
     * 1024;
+/// The digital phosphor's counts (scope_dpo.rs, 13 615 B) live in the last
+/// DPO_K samples of BUF, but only while the phosphor is shown (`dpo_eff`):
+/// the rings are then that much shorter (36 K raw, 55 688 packed). Roll,
+/// the wave view, the decoder's log and Persist other than DPO / HOT have
+/// the whole record (owner 2026-11-12). The claim changes in `start` only,
+/// where the record before is given up anyway.
+pub const DPO_K: usize = 7 * 1024 * cfg!(feature = "dpo") as usize;
+/// The tail is the phosphor's now / wanted by the page (Persist DPO / HOT).
+static DPO_MEM: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static DPO_WANT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Counts each claim (the phosphor zeroes its counts on a new one).
+static DPO_GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// BUF's samples for the rings in flight (CAP, less the phosphor's tail).
+#[inline]
+fn capn() -> usize {
+    if DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) { CAP - DPO_K } else { CAP }
+}
+
+/// The phosphor's memory (BUF's tail, DPO_K * 2 bytes) and its claim count,
+/// while it is claimed.
+pub fn dpo_tail() -> Option<(*mut u8, u32)> {
+    if DPO_K == 0 || !DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    // SAFETY: the rings in flight end at capn() (`start`).
+    Some((unsafe { (core::ptr::addr_of_mut!(DMA.buf) as *mut u8).add((CAP - DPO_K) * 2) }, DPO_GEN.load(core::sync::atomic::Ordering::Relaxed)))
+}
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
 pub const LOG_RING: usize = 16 * 1024;
@@ -90,6 +116,17 @@ pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::Atomic
 /// Packed ring (samples): what RB holds packed, less 15 bytes, at most
 /// the stock's 65 520-sample record (65 520 from CAP 42 K up).
 pub const PCAP: usize = if (RB - 15) * 8 / 10 > 65_520 { 65_520 } else { (RB - 15) * 8 / 10 };
+/// STG0 / RB / PCAP of the rings in flight (`capn`).
+#[inline]
+fn stg0() -> usize {
+    capn() - STG
+}
+fn rbn() -> usize {
+    (stg0() * 2 - 4) / 5 * 5
+}
+fn pcap() -> usize {
+    ((rbn() - 15) * 8 / 10).min(65_520)
+}
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;
@@ -111,7 +148,7 @@ const _: () = assert!(INRUSH_LEN <= CAP);
 /// frame (one complete linear record each) does not wait longer than
 /// before the record grew.
 fn lin_len(fs: u32) -> usize {
-    (fs as usize / 10).clamp(INRUSH_LEN, CAP)
+    (fs as usize / 10).clamp(INRUSH_LEN, capn())
 }
 /// Stale samples held at the front of a comparator ring record
 /// (dlog::scope_hold_head; device 2026-11-01 at 12.5 MS/s, also after the
@@ -1371,8 +1408,8 @@ impl Scope {
                 wv().restart = true;
                 wv().live = false;
             }
-            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, PCAP - 2600);
-            self.rec = PCAP;
+            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, pcap() - 2600);
+            self.rec = pcap();
             self.deadline = 0;
             return;
         }
@@ -1532,12 +1569,13 @@ impl Scope {
             if head > 0 && len > head {
                 // SAFETY: main loop, the DMA is stopped (raw ring of CAP).
                 let b = unsafe { &mut *core::ptr::addr_of_mut!(DMA.buf) };
-                let v = b[(off + head) % CAP] & 0x3FF;
+                let cap = capn();
+                let v = b[(off + head) % cap] & 0x3FF;
                 for i in 0..head {
-                    b[(off + i) % CAP] = v;
+                    b[(off + i) % cap] = v;
                 }
             }
-            pack10::pack_in_place(base(), ((off + len).min(CAP) + 3) & !3);
+            pack10::pack_in_place(base(), ((off + len).min(capn()) + 3) & !3);
         }
         r.off = off;
         // The coded ring's views: cap 0 (pack10::Codes).
@@ -1577,7 +1615,7 @@ impl Scope {
 
     /// Size of the ring in flight (samples).
     fn cap(&self) -> usize {
-        if rg().pk { PCAP } else { CAP }
+        if rg().pk { pcap() } else { capn() }
     }
 
     /// The ring's samples oldest first, (first slot, count), from the next
@@ -1600,7 +1638,7 @@ impl Scope {
         // ms * S/s in u32 (fs <= PK_FS): samples in the gap, x 1000.
         let lost = (now.saturating_sub(r.t).min(100_000) as u32) * self.sample_rate() + 64_000 >= STG as u32 * 1000;
         r.t = now;
-        let stg = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[STG0..] };
+        let stg = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[stg0()..stg0() + STG] };
         let (mut rd, mut n) = (r.rd, self.roll_written);
         // Roll: the columns' min / max as the samples come (as wave_drain;
         // roll_poll draws them without reading the ring).
@@ -1656,7 +1694,8 @@ impl Scope {
 
     /// Raw ring: the next slot the DMA writes.
     fn raw_wr(&self) -> usize {
-        (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP
+        let cap = capn();
+        (cap - unsafe { r32(S4 + 0x04) } as usize % (cap + 1)) % cap
     }
 
     /// HISR TCIF4 (the raw ring has wrapped, while the stream runs).
@@ -1748,6 +1787,8 @@ impl Scope {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         // Slow rates: the DMA fills the staging ring, the polls pack it.
         let pk = fs <= PK_FS;
+        // The phosphor's tail of BUF: taken / given back here only.
+        self.dpo_claim(self.dpo_eff());
         *rg() = Ring { pk, raw: !pk, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
         if pk {
             // Coded blocks for the long captures only (Single / DIGitize,
@@ -1758,7 +1799,7 @@ impl Scope {
         // Linear: Single / DIGitize take the record rec_split waits for.
         let (p, q) = self.rec_split();
         self.rec = lin_len(fs).max(p + q);
-        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32 + if pk { 2 * STG0 as u32 } else { 0 };
+        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32 + if pk { 2 * stg0() as u32 } else { 0 };
         let k_lin = crate::dlog::scope_stale_head(fs);
         unsafe {
             w32(LIFCR, 0x3D << 22);
@@ -1827,7 +1868,7 @@ impl Scope {
             let (len, circ) = if pk {
                 (STG as u32, 1 << 8)
             } else if ring {
-                (CAP as u32, 1 << 8)
+                (capn() as u32, 1 << 8)
             } else {
                 ((self.rec + self.lin_pre) as u32, 0)
             };
@@ -1900,7 +1941,7 @@ impl Scope {
         };
         let n = top.min(lim).max(self.screen);
         let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
-        let q = if ring { (n - p).min(PCAP - 64 - WIN - pre) } else { n - p };
+        let q = if ring { (n - p).min(pcap() - 64 - WIN - pre) } else { n - p };
         (p.max(pre), q.max(post))
     }
 
@@ -2079,7 +2120,7 @@ impl Scope {
             return (off, len);
         }
         let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
-        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % CAP };
+        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % capn() };
         (off, n)
     }
 
@@ -2313,6 +2354,38 @@ impl Scope {
     /// Roll mode applies to the next acquisition: Roll on, a roll timebase,
     /// and no single record wanted (Single sweep, DIGitize), which captures
     /// a full linear record like the stock Single mode.
+    /// The phosphor has BUF's tail for the acquisition to come: wanted
+    /// (Persist DPO / HOT) and shown there (no roll, wave view or log).
+    fn dpo_eff(&self) -> bool {
+        DPO_K != 0 && DPO_WANT.load(core::sync::atomic::Ordering::Relaxed) && !self.roll_ok() && !self.wave && !self.log
+    }
+
+    /// Give BUF's tail to the phosphor (`on`) or back to the rings; a
+    /// change empties the coded ring (its length) and the stored record.
+    fn dpo_claim(&mut self, on: bool) {
+        if DPO_K == 0 || DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) == on {
+            return;
+        }
+        DPO_MEM.store(on, core::sync::atomic::Ordering::Relaxed);
+        DPO_GEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        crate::cring::init(base(), rbn() as u32);
+        self.stored_valid = false;
+    }
+
+    /// The page's Persist DPO / HOT (each pass): a change restarts a
+    /// running acquisition, so `start` moves the tail.
+    pub fn dpo_want(&mut self, on: bool) {
+        DPO_WANT.store(on, core::sync::atomic::Ordering::Relaxed);
+        if self.dpo_eff() != DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) && self.s.run && self.busy && !self.stop_req && !self.one_shot && !self.wave && !self.log && !self.lent {
+            self.halt();
+        }
+    }
+
+    /// The phosphor's tail is claimed (the page draws from its counts).
+    pub fn dpo_mem(&self) -> bool {
+        DPO_MEM.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
     fn roll_ok(&self) -> bool {
         self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot
     }
@@ -2515,7 +2588,7 @@ impl Scope {
             return self.pk_drain(now).then_some(self.roll_written);
         }
         let wr = self.raw_wr();
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        let d = (wr + capn() - self.roll_last_wr) % capn();
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         Some(self.roll_written)
@@ -2819,6 +2892,7 @@ impl Scope {
         wv().mcx = self.s;
         self.stored_valid = false;
         self.wave = true;
+        self.dpo_claim(false);
         wv().sc = sc;
         wv().fs = 0; // apply: restart at the timebase's rate
         let mut s = ws;
@@ -2857,6 +2931,8 @@ impl Scope {
         if !self.log {
             self.lend_buf();
             self.log = true;
+            // The log's memory is BUF to its end (`log_mem`).
+            self.dpo_claim(false);
         } else {
             self.halt();
         }

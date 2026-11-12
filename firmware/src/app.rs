@@ -2372,6 +2372,8 @@ impl App {
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
             | if self.cont_always { 0 } else { crate::meter::EXT_CONT_VOL }
+            // The USB disk mode asked for (owner 2026-11-12: kept).
+            | if usb_ro().1 { 0 } else { crate::meter::EXT_USB_RW }
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
@@ -2431,6 +2433,9 @@ impl App {
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_VOL == 0;
         crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
+        // The USB disk mode (Settings > Other): as it was left.
+        #[cfg(feature = "vdisk")]
+        crate::vwrite::set_read_only_boot(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_USB_RW == 0);
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
@@ -4294,8 +4299,9 @@ impl App {
                     }
                     ui::S_USB => {
                         // USB disk (decision 2026-10-22 #6): Files live <->
-                        // PC can edit, volatile; in force at the next bus
-                        // reset (the host reads the WP bit when it mounts).
+                        // PC can edit; in force at the next bus reset (the
+                        // host reads the WP bit when it mounts). Kept over
+                        // a restart (this fork, owner 2026-11-12).
                         let ro = !usb_ro().1;
                         #[cfg(feature = "vdisk")]
                         crate::vwrite::set_read_only(ro);

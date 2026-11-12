@@ -789,6 +789,8 @@ impl App {
 
     /// Repaint whatever changed (model diff, graph rows).
     pub(super) fn sp_update(&mut self, now: u64) {
+        // Persist DPO / HOT wants the record buffer's tail (scope::dpo_want).
+        self.scope.dpo_want(self.sp.persist >= 4);
         // The wide graph on / off: set here (the scope view's full redraw
         // goes by App::repaint_strips, not sp_draw_static), then the whole
         // page again.
@@ -982,7 +984,10 @@ impl App {
         // STOP show the plain trace (and forget the counts).
         let fresh = core::mem::replace(&mut c.fresh, false);
         let ident = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
-        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run { self.sp.persist - 3 } else { 0 };
+        // Its counts live in the record buffer's tail while the scope lends
+        // it (scope::dpo_tail: not in roll, the wave view, the log).
+        crate::scope_dpo::attach(crate::scope::dpo_tail());
+        let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run && self.scope.dpo_mem() { self.sp.persist - 3 } else { 0 };
         if dm != 0 {
             if fresh {
                 crate::scope_dpo::frame(&g.tr, h as i16);

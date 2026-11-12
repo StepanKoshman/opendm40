@@ -5,6 +5,31 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.21-S2084 (2026-11-12)
+
+On v0.4.20-S2084. A test build of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release. Not yet run on a real meter.
+
+### Changed
+
+- **The full record depth is back wherever the phosphor is not shown.** The
+  DPO test builds (0.4.18 .. 0.4.20) had a 7 K samples shorter record all
+  the time. The phosphor's counts now take the end of the record buffer
+  only while Persist is DPO or HOT and the phosphor is drawn: with Persist
+  OFF / MIN / 1S / INF, in roll, in the wave view and for the decoder's log
+  the record is 44 032 samples (65 520 on the slow timebases and in roll)
+  as in 0.4.17. With DPO / HOT on it stays 36 864 / 55 688. Switching
+  Persist to or from DPO / HOT restarts the acquisition.
+- **The USB disk mode is kept over a restart.** Settings > Other > USB disk
+  (Files live / PC can edit) came back to Files live at every power-on; the
+  meter now starts in the mode it was left in.
+
+Кратко: полная глубина записи осциллографа (44 K, в ROLL и на медленных
+развёртках 65 520) возвращена везде, где не показывается DPO; с Persist DPO /
+HOT запись по-прежнему 36 K / 55 688. Режим USB-диска (Files live / PC can
+edit) сохраняется после перезапуска.
+
 ## v0.4.20-S2084 (2026-11-07)
 
 On v0.4.19-S2084. A test build of

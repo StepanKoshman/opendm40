@@ -2004,7 +2004,8 @@ INQUIRY product `DM40 files`. **Read-only by default** ("Files live",
 [decisions-2026-10-22](../../docs/history/decisions-2026-10-22.md) #6): the WP bit set, every WRITE fails DATA PROTECT
 07/27/00, a change goes out as a UNIT ATTENTION at once. Settings > Other
 "USB disk" = "PC can edit" (or `DBG:VDISK:RO 0`) asks for the writable
-volume: volatile (read-only again at every boot) and in force from the next
+volume: kept over a restart in this fork (persist word 38 bit 29; upstream:
+volatile, read-only again at every boot) and in force from the next
 USB bus reset (a re-plug; a host reads the WP bit when it mounts, so the
 mode never changes under a host); then a WRITE is judged sector by sector
 (`src/vwrite.rs`, "Host writes" below), anything not accepted fails DATA

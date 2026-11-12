@@ -1580,8 +1580,10 @@ up to 5 items; the normal bar shows the first 4.
 went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour
 in 12 brightness steps, **HOT** blue (rare) to red (always). The count fades
 by a step every 16 frames. A drag, a pinch, a settings change, roll and STOP
-show the plain trace and start the count over. The scope record is 7 K
-samples shorter in this build (36 K) for the counts' memory.
+show the plain trace and start the count over. While DPO / HOT is on the
+scope record is 7 K samples shorter (36 K; 55 688 on the slow timebases):
+the counts use the end of its memory. Roll and the other Persist settings
+have the whole record.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
@@ -2320,8 +2322,8 @@ Set in **Settings > Other > USB disk**.
   read-only.
 
 A change of the mode takes effect at the next USB plug: unplug the cable
-and plug it in again. Until then the row shows **(replug)**. The meter
-always starts in **Files live**.
+and plug it in again. Until then the row shows **(replug)**. The mode is
+kept over a restart: the meter starts in the mode it was left in.
 
 A file manager usually moves a deleted file to the trash. A file moved to
 the trash is deleted on the meter at the eject, unless you take it out of
@@ -2494,7 +2496,7 @@ goes back to the main menu.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
-| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
+| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Kept over a restart. |
 | **Device info** | | | Opens the [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Help** | | | The [on-screen help](#on-screen-help). |
@@ -3006,7 +3008,7 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
+| All [settings](#settings), **USB disk** included; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
 | Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep; the scope's probe factor | Scope: the timebase, V/div, coupling, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |

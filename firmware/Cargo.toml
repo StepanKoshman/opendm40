@@ -1,6 +1,6 @@
 [package]
 name = "opendm40"
-version = "0.4.20-S2084"
+version = "0.4.21-S2084"
 edition = "2021"
 description = "Replacement firmware for the Alientek DM40 (GD32F427)"
 
@@ -21,9 +21,9 @@ panic = "abort"
 
 [features]
 default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
-# Digital phosphor (Display > Persist DPO / HOT; src/scope_dpo.rs): 14 KB of
-# SRAM for the hit counts, paid by the scope record (scope::CAP 7 K samples
-# shorter). Default on the DPO test build.
+# Digital phosphor (Display > Persist DPO / HOT; src/scope_dpo.rs): its 14 KB
+# of hit counts are the tail of the scope's record buffer while the phosphor
+# is shown (scope::DPO_K: the rings 7 K samples shorter then).
 dpo = []
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.

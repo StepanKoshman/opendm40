@@ -8,8 +8,10 @@
 //! 4 * log2(p * DECAY): an always-hit cell at the top (15), one hit in a
 //! quarter of the frames at 8, a rare one flashes at 1 and fades.
 //!
-//! Memory: NCOL x NB nibbles (13 965 B) in SRAM, paid for by the scope
-//! record (scope::CAP 7 K samples shorter with the feature).
+//! Memory: NCOL x NB nibbles (13 615 B) in the tail of the scope's record
+//! buffer, lent only while the phosphor is shown (scope::dpo_tail: the
+//! rings are 7 K samples shorter then; roll and Persist other than DPO /
+//! HOT keep the whole record). `attach` takes it each render.
 
 use crate::lcd::Color;
 use crate::scope_ui as su;
@@ -24,7 +26,10 @@ const BYTES: usize = if ENABLED { su::NCOL * NB / 2 } else { 0 };
 pub const DECAY: u8 = 16;
 
 pub struct Dpo {
-    cnt: [u8; BYTES],
+    /// The counts (BYTES at scope::dpo_tail; null: not lent) and the claim
+    /// they were zeroed for.
+    cnt: *mut u8,
+    gen: u32,
     /// Per column: cells to repaint (first, last + 1; last + 1 == 0: none,
     /// so the all-zero .sram_bss start is "nothing").
     dirty: [(u8, u8); su::NCOL],
@@ -36,7 +41,12 @@ pub struct Dpo {
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut D: Dpo = Dpo { cnt: [0; BYTES], dirty: [(0, 0); su::NCOL], any: false, rng: 0, frames: 0, h: 0 };
+static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, rng: 0, frames: 0, h: 0 };
+/// The host tools' counts (no scope buffer there).
+#[cfg(not(target_os = "none"))]
+static mut HOST: [u8; BYTES] = [0; BYTES];
+#[cfg(target_os = "none")]
+const _: () = assert!(BYTES <= crate::scope::DPO_K * 2);
 
 fn d() -> &'static mut Dpo {
     // SAFETY: main loop only (the scope page and its graph flush).
@@ -76,14 +86,55 @@ fn mark(dt: &mut (u8, u8), b: usize) {
     }
 }
 
+/// The counts' memory (null: none).
+#[inline]
+fn cntp() -> *mut u8 {
+    #[cfg(not(target_os = "none"))]
+    {
+        core::ptr::addr_of_mut!(HOST) as *mut u8
+    }
+    #[cfg(target_os = "none")]
+    {
+        d().cnt
+    }
+}
+
+fn cnt() -> Option<&'static mut [u8]> {
+    let p = cntp();
+    // SAFETY: BYTES at scope::dpo_tail while lent (main loop only).
+    (!p.is_null() && ENABLED).then(|| unsafe { core::slice::from_raw_parts_mut(p, BYTES) })
+}
+
+/// The scope's loan (scope::dpo_tail, each render): none: no counts; a
+/// new claim: the counts start at zero.
+pub fn attach(mem: Option<(*mut u8, u32)>) {
+    let s = d();
+    match mem {
+        None => s.cnt = core::ptr::null_mut(),
+        Some((p, g)) => {
+            if s.cnt != p || s.gen != g {
+                s.cnt = p;
+                s.gen = g;
+                // SAFETY: as `cnt`.
+                unsafe { core::ptr::write_bytes(p, 0, BYTES) };
+                s.dirty = [(0, 0); su::NCOL];
+                s.any = false;
+                s.frames = 0;
+            }
+        }
+    }
+}
+
 /// Count of cell `b` in column `i` (0: none).
 #[inline]
 pub fn get(i: usize, b: usize) -> u8 {
-    if !ENABLED || b >= NB {
+    let p = cntp();
+    if !ENABLED || b >= NB || p.is_null() {
         return 0;
     }
     let k = i * NB + b;
-    let v = d().cnt[k >> 1];
+    // SAFETY: k / 2 < BYTES (i < NCOL, b < NB).
+    let v = unsafe { *p.add(k >> 1) };
     if k & 1 == 0 { v & 15 } else { v >> 4 }
 }
 
@@ -99,9 +150,12 @@ pub fn clear() {
     if !ENABLED {
         return;
     }
+    let Some(cnt) = cnt() else {
+        return;
+    };
     let s = d();
     for i in 0..su::NCOL {
-        let col = &mut s.cnt[i * NB / 2..(i + 1) * NB / 2];
+        let col = &mut cnt[i * NB / 2..(i + 1) * NB / 2];
         let (mut lo, mut hi) = (u8::MAX, 0u8);
         for (j, v) in col.iter_mut().enumerate() {
             if *v != 0 {
@@ -125,6 +179,9 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16) {
     if !ENABLED {
         return;
     }
+    let Some(cnt) = cnt() else {
+        return;
+    };
     if d().h != h {
         clear();
         d().h = h;
@@ -138,7 +195,7 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16) {
         let (c0, c1) = (cell_of(a.max(1)), cell_of(b.min(h - 2)).min(NB - 1));
         for c in c0..=c1 {
             let k = i * NB + c;
-            let v = &mut s.cnt[k >> 1];
+            let v = &mut cnt[k >> 1];
             let sh = (k & 1) * 4;
             let n = (*v >> sh) & 15;
             if n < 15 && (n == 0 || rnd(&mut r) < RAISE[n as usize]) {
@@ -154,7 +211,7 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16) {
         s.frames = 0;
         for i in 0..su::NCOL {
             for j in 0..NB / 2 {
-                let v = &mut s.cnt[i * NB / 2 + j];
+                let v = &mut cnt[i * NB / 2 + j];
                 if *v == 0 {
                     continue;
                 }
