@@ -53,6 +53,18 @@ print('Flash use by module (bytes): B (zero-wait) / C (.cold) / A2')
 rows = sorted(tot.items(), key=lambda kv: -(kv[1]['B'] + kv[1]['C'] + kv[1]['A2']))
 for m, c in rows[:60]:
     print('  %-22s B %7d  C %6d  A2 %5d  total %7d' % (m, c['B'], c['C'], c['A2'], c['B'] + c['C'] + c['A2']))
+# App's methods (app*.rs) by name prefix (sp_ scope page, log_ logger,
+# pw_ power meter, ...): which feature the 130 KB of `app` is.
+grp = collections.defaultdict(lambda: collections.Counter())
+for r, lst in syms.items():
+    for sz, kind, name in lst:
+        m = re.match(r'<opendm40::app::App>::(\w+)', name)
+        if m:
+            k = m.group(1).split('_')[0] if '_' in m.group(1) else m.group(1)
+            grp[k][r] += sz
+print("App's methods by prefix (bytes): B / C")
+for k, c in sorted(grp.items(), key=lambda kv: -(kv[1]['B'] + kv[1]['C']))[:45]:
+    print('  %-16s B %7d  C %6d' % (k, c['B'], c['C']))
 for r in ('B', 'C'):
     print('Largest symbols in region %s:' % r)
     for sz, kind, name in sorted(syms[r], reverse=True)[:50]:
