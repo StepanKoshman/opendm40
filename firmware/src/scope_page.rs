@@ -3129,7 +3129,8 @@ impl App {
     /// capacitor) the second record's mean code sets the range's trim
     /// (scope::zero_add), used in AC and DC. A clipped record (a large AC
     /// signal) or one far off zero stops it, the ranges done so far kept.
-    #[inline(never)] // .cold (link-native.x)
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.sp_zero_start")] // region A2: C and B are full
     pub(super) fn sp_zero_start(&mut self, now: u64) {
         if self.scope.wave_on() {
             return;
@@ -3141,6 +3142,8 @@ impl App {
         self.sp_zero_range(now);
     }
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.sp_zero_range")] // region A2: C and B are full
     fn sp_zero_range(&mut self, now: u64) {
         // SAFETY: main loop only.
         let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).as_mut() }) else { return };
@@ -3160,7 +3163,8 @@ impl App {
     }
 
     /// One record during the zero calibration (App::scope_poll).
-    #[inline(never)] // .cold (link-native.x)
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.sp_zero_step")] // region A2: C and B are full
     pub(super) fn sp_zero_step(&mut self, f: &scope::Frame, now: u64) {
         // SAFETY: main loop only.
         let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).as_mut() }) else { return };
@@ -3190,6 +3194,8 @@ impl App {
         }
     }
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.sp_zero_end")] // region A2: C and B are full
     fn sp_zero_end(&mut self, now: u64, msg: &str, ok: bool) {
         // SAFETY: main loop only.
         let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).take() }) else { return };

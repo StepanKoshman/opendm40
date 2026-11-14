@@ -384,12 +384,6 @@ SECTIONS
         *(.text.*8opendm405scope*8dpo_next*);
         *(.text.*8opendm405scope*7hw_spin*);
         *(.text.*11sp_dpo_more*);
-        /* Settings > Save > Zero cal (scope_page.rs, scope.rs). */
-        *(.text.*13sp_zero_start*);
-        *(.text.*13sp_zero_range*);
-        *(.text.*12sp_zero_step*);
-        *(.text.*11sp_zero_end*);
-        *(.text.*8opendm405scope*8zero_add*);
         *(.text.*8opendm408scope_ui6mf_hit*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */

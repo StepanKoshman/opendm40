@@ -1149,7 +1149,8 @@ impl Scope {
     /// code of a record with 0 V at the input. Adds its error to the trim
     /// and returns it (codes); None (nothing changed): more than 48 codes
     /// off, not a zero input.
-    #[inline(never)] // .cold (link-native.x): the zero calibration
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.zero_add")] // region A2: C and B are full
     pub fn zero_add(&mut self, mean: f32) -> Option<f32> {
         let r = self.s.range;
         let e = mean - self.gain(r).1;
