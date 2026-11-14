@@ -27,9 +27,22 @@ official opendm40 release. Not yet run on a real meter.
   is taken only when the last one is fully painted (linear records and the
   comparator ring; the stream, roll and wave view keep polling).
 
+### Changed
+
+- **Scope: faster frames with the hardware trigger.** A running record
+  with the comparator trigger is now only its screen and the trigger search
+  window (a short ring of screen + 1.9 K samples) instead of the whole
+  43 K buffer: at 50 MS/s a record took ~0.9 ms to fill and was then packed
+  whole, every frame. The comparator is armed and the stop awaited within
+  the same main-loop pass (up to 250 us), so a fast signal gives a frame per
+  pass instead of one per three or more. STOP still takes a full-length
+  capture, and Single / DIGitize and Persist DPO / HOT keep the whole buffer.
+
 Кратко: сопротивление на зелёной полосе SHORT / BEEP в режиме диода
 обведено чёрным контуром; полоса стала на 2 px выше. Осциллограф: на
-экране всегда одна запись, без разрывов линии на AM / FM сигнале.
+экране всегда одна запись, без разрывов линии на AM / FM сигнале; с
+аппаратным триггером кадры идут чаще (запись только на экран и окно поиска,
+STOP по-прежнему снимает полную глубину).
 
 ## v0.4.23-S2084 (2026-11-12)
 

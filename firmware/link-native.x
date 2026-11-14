@@ -382,6 +382,7 @@ SECTIONS
         /* The phosphor's further screens of a record: the loops' work is
          * in region B (pack10::min_max, scope_dpo::hit, find_trigger). */
         *(.text.*8opendm405scope*8dpo_next*);
+        *(.text.*8opendm405scope*7hw_spin*);
         *(.text.*11sp_dpo_more*);
         *(.text.*8opendm408scope_ui6mf_hit*);
         *(.text.*8opendm407persist4init*);

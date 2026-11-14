@@ -85,6 +85,25 @@ static DPO_MEM: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool:
 static DPO_WANT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// Counts each claim (the phosphor zeroes its counts on a new one).
 static DPO_GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// A running comparator record's raw ring (samples; 0: the whole BUF,
+/// `capn`): only the screen and the trigger search window, so a frame is
+/// captured and packed in microseconds instead of a full record (43 K
+/// samples, ~0.9 ms at 50 MS/s, then packed) per frame (owner 2026-11-14:
+/// "the scope is less responsive than the stock"). A STOP takes a full
+/// capture of its own (stop_req), Single / DIGitize and the phosphor keep
+/// the whole ring. Set by `start` only.
+static SHORT_RING: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+/// The raw ring in flight: `SHORT_RING`, else the whole buffer.
+fn ringn() -> usize {
+    match SHORT_RING.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => capn(),
+        r => r.min(capn()),
+    }
+}
+/// Longest busy-wait for a short comparator record inside one poll (DWT
+/// cycles, 250 us at 200 MHz): arm and the edge plus the post part in the
+/// same pass when the signal repeats faster than that.
+const HW_SPIN: u32 = 50_000;
 
 /// BUF's samples for the rings in flight (CAP, less the phosphor's tail).
 #[inline]
@@ -1569,13 +1588,13 @@ impl Scope {
             if head > 0 && len > head {
                 // SAFETY: main loop, the DMA is stopped (raw ring of CAP).
                 let b = unsafe { &mut *core::ptr::addr_of_mut!(DMA.buf) };
-                let cap = capn();
+                let cap = ringn();
                 let v = b[(off + head) % cap] & 0x3FF;
                 for i in 0..head {
                     b[(off + i) % cap] = v;
                 }
             }
-            pack10::pack_in_place(base(), ((off + len).min(capn()) + 3) & !3);
+            pack10::pack_in_place(base(), ((off + len).min(ringn()) + 3) & !3);
         }
         r.off = off;
         // The coded ring's views: cap 0 (pack10::Codes).
@@ -1615,7 +1634,7 @@ impl Scope {
 
     /// Size of the ring in flight (samples).
     fn cap(&self) -> usize {
-        if rg().pk { pcap() } else { capn() }
+        if rg().pk { pcap() } else { ringn() }
     }
 
     /// The ring's samples oldest first, (first slot, count), from the next
@@ -1694,7 +1713,7 @@ impl Scope {
 
     /// Raw ring: the next slot the DMA writes.
     fn raw_wr(&self) -> usize {
-        let cap = capn();
+        let cap = ringn();
         (cap - unsafe { r32(S4 + 0x04) } as usize % (cap + 1)) % cap
     }
 
@@ -1789,6 +1808,7 @@ impl Scope {
         let pk = fs <= PK_FS;
         // The phosphor's tail of BUF: taken / given back here only.
         self.dpo_claim(self.dpo_eff());
+        SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         *rg() = Ring { pk, raw: !pk, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
         if pk {
             // Coded blocks for the long captures only (Single / DIGitize,
@@ -1858,6 +1878,16 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
+            // A running comparator record: a ring of the screen, the search
+            // window and slack for a late edge (`SHORT_RING`).
+            if hw && !pk && !self.long_rec() && !self.one_shot && !self.stop_req && !self.dpo_eff() {
+                let n = self.screen + WIN + 64;
+                let r = (n + 1024 + 3) & !3;
+                if r < capn() {
+                    SHORT_RING.store(r, core::sync::atomic::Ordering::Relaxed);
+                    self.rec = n;
+                }
+            }
             // A raw linear record starts k_lin samples early in DMA.pre: the
             // ADC's stale output (dlog::scope_stale_head) is not recorded,
             // the record's sample 0 is TIM1 period k_lin. The rings (and the
@@ -1868,7 +1898,7 @@ impl Scope {
             let (len, circ) = if pk {
                 (STG as u32, 1 << 8)
             } else if ring {
-                (capn() as u32, 1 << 8)
+                (ringn() as u32, 1 << 8)
             } else {
                 ((self.rec + self.lin_pre) as u32, 0)
             };
@@ -2120,13 +2150,44 @@ impl Scope {
             return (off, len);
         }
         let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
-        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % capn() };
+        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % ringn() };
         (off, n)
+    }
+
+    /// A short comparator record (`SHORT_RING`) in flight.
+    fn short() -> bool {
+        SHORT_RING.load(core::sync::atomic::Ordering::Relaxed) != 0
+    }
+
+    /// A short comparator record: arm as soon as its pre-trigger part is in
+    /// and wait for the stop, at most HW_SPIN (a slower signal: the next
+    /// polls, as before).
+    #[inline(never)]
+    fn hw_spin(&mut self) {
+        let pre = hwtrig::pre_for(self.rec_split().0, WIN);
+        let t0 = unsafe { r32(DWT_CYCCNT) };
+        loop {
+            match self.hw.status() {
+                Status::Prepared => {
+                    if self.raw_tc() || self.raw_wr() >= pre {
+                        self.hw.arm();
+                    }
+                }
+                Status::Armed | Status::Fired => {}
+                Status::Done | Status::Off => return,
+            }
+            if unsafe { r32(DWT_CYCCNT) }.wrapping_sub(t0) > HW_SPIN {
+                return;
+            }
+        }
     }
 
     /// Hardware-trigger acquisition in flight: arm after the pre-trigger part,
     /// then wait for TIM2 to gate TIM1 off (Done) or for the Auto timeout.
     fn hw_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        if Self::short() {
+            self.hw_spin();
+        }
         let Some((wr, wrapped)) = self.pos(now) else {
             self.halt();
             return None;
@@ -2574,7 +2635,10 @@ impl Scope {
                         self.auto_timeout()
                     };
             }
-            return None;
+            // A short comparator record: arm and wait for it in this pass.
+            if !(self.hw_mode && Self::short()) {
+                return None;
+            }
         }
         if self.rolling {
             return self.roll_poll(now);
@@ -2917,6 +2981,7 @@ impl Scope {
         self.stored_valid = false;
         self.wave = true;
         self.dpo_claim(false);
+        SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         wv().sc = sc;
         wv().fs = 0; // apply: restart at the timebase's rate
         let mut s = ws;
@@ -2968,6 +3033,7 @@ impl Scope {
             self.log = true;
             // The log's memory is BUF to its end (`log_mem`).
             self.dpo_claim(false);
+            SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         } else {
             self.halt();
         }
