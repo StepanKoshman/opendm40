@@ -816,8 +816,7 @@ reading in the first 2 s on a range can be a little off. FAST is a little
 noisier than MED; for the extra digit use MED or SLOW.
 
 In Ω the averages are longer: 6.4 s in MED on every range, in SLOW
-12.8 s from 60 Ω to 60 kΩ and 6.4 s above (no extra digit on 60 Ω). In DC
-mA and µA the MED average is 3.2 s. After a step of the input or a range change the
+12.8 s from 60 Ω to 60 kΩ and 6.4 s above (no extra digit on 60 Ω). After a step of the input or a range change the
 average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -836,13 +835,10 @@ average restarts, so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears after the main digits on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V, every DC A, mA and µA range, and every Ω range
-from 600 Ω to 60 MΩ, about 1.6 s (MED in DC V and A) or 3.2 s (SLOW, mA, µA
-and Ω) after the input settles. On the current ranges and in Ω from
-600 kΩ it is mostly noise: on the A ranges it is 0.1 µV across the shunt,
-the level of thermal EMF; at high resistance mains hum and leakage dominate (shielded
-leads help). Wherever it can
-appear, the reading starts further left, so the other digits never move.
+DC 600 mV, 6 V, 60 V, 600 V and every Ω range from 600 Ω to 60 MΩ, about
+1.6 s (MED in DC) or 3.2 s (SLOW, and in Ω) after the input settles. From
+600 kΩ mains hum and leakage dominate it (shielded leads help). Wherever it
+can appear, the reading starts further left, so the other digits never move.
 
 #### Smoothing
 

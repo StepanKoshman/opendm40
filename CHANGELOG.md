@@ -5,14 +5,35 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
-## v0.4.24-S2084 (2026-11-12)
+## v0.4.24-S2084 (2026-11-14)
 
-On v0.4.23-S2084. A test build of
+On v0.4.23-S2084. A release of
 [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
-official opendm40 release. Not yet run on a real meter.
+official opendm40 release.
+
+### Added
+
+- **Scope: Zero cal** (MF > Settings, owner: a 1.5 mV offset on a shorted
+  probe, the same in AC and DC). Measures each hardware range's zero in AC
+  coupling, so the probe stays connected; the offset PWM then aims that much
+  lower and 0 V lands on the factory zero code (AC and DC). Kept over a
+  restart and power-off (settings record v12, 73 words: p[70..73]). The
+  offset PWM's compare value is now rounded, not truncated.
+- **DMM: the extra digit on Ω 600 kΩ .. 60 MΩ** (owner): MED / SLOW
+  average them over 16 conversions (6.4 s), as 600 Ω .. 60 kΩ. Ω 60 Ω,
+  60 mV and the current ranges go without it (tried on DC A, mA and µA:
+  the digit never came, owner).
 
 ### Changed
 
+- **Scope: faster frames with the hardware trigger.** A running record
+  with the comparator trigger is now only its screen and the trigger search
+  window (a short ring of screen + 1.9 K samples) instead of the whole
+  43 K buffer: at 50 MS/s a record took ~0.9 ms to fill and was then packed
+  whole, every frame. The comparator is armed and the stop awaited within
+  the same main-loop pass (up to 250 us), so a fast signal gives a frame per
+  pass instead of one per three or more. STOP still takes a full-length
+  capture, and Single / DIGitize and Persist DPO / HOT keep the whole buffer.
 - **Diode: the resistance on the SHORT / BEEP band is outlined in black**,
   so the orange reads clearly on the green. The band is 1 px taller at the
   top and at the bottom (y 37..64) to fit the outline.
@@ -27,38 +48,12 @@ official opendm40 release. Not yet run on a real meter.
   is taken only when the last one is fully painted (linear records and the
   comparator ring; the stream, roll and wave view keep polling).
 
-### Added
-
-- **Scope: Zero cal** (MF > Settings, owner: a 1.5 mV offset on a shorted
-  probe, the same in AC and DC). Measures each hardware range's zero in AC
-  coupling, so the probe stays connected; the offset PWM then aims that much
-  lower and 0 V lands on the factory zero code (AC and DC). Kept in the
-  settings record (v12, 73 words: p[70..73]). The offset PWM's compare value
-  is now rounded, not truncated.
-
-- **DMM: the extra digit on DC A, mA, µA and Ω 600 kΩ .. 60 MΩ** (owner).
-  MED / SLOW average them like DC V (A: 8 conversions; mA / µA, with half
-  the codes per count: 16; Ω 600 kΩ .. 60 MΩ: 16, MED 6.4 s). Ω 60 Ω and
-  60 mV still go without it.
-
-### Changed
-
-- **Scope: faster frames with the hardware trigger.** A running record
-  with the comparator trigger is now only its screen and the trigger search
-  window (a short ring of screen + 1.9 K samples) instead of the whole
-  43 K buffer: at 50 MS/s a record took ~0.9 ms to fill and was then packed
-  whole, every frame. The comparator is armed and the stop awaited within
-  the same main-loop pass (up to 250 us), so a fast signal gives a frame per
-  pass instead of one per three or more. STOP still takes a full-length
-  capture, and Single / DIGitize and Persist DPO / HOT keep the whole buffer.
-
-Кратко: сопротивление на зелёной полосе SHORT / BEEP в режиме диода
-обведено чёрным контуром; полоса стала на 2 px выше. Осциллограф: на
-экране всегда одна запись, без разрывов линии на AM / FM сигнале; с
-аппаратным триггером кадры идут чаще (запись только на экран и окно поиска,
-STOP по-прежнему снимает полную глубину). Калибровка нуля осциллографа
-(MF > Settings > Zero cal) без замыкания щупа. Шестой разряд в DC A, mA,
-µA и в Ω от 600 kΩ до 60 MΩ.
+Кратко: калибровка нуля осциллографа (MF > Settings > Zero cal) без
+замыкания щупа, сохраняется после выключения. Шестой разряд в Ω от 600 kΩ
+до 60 MΩ. Осциллограф: на экране всегда одна запись, без разрывов линии на
+AM / FM сигнале; с аппаратным триггером кадры идут чаще (STOP по-прежнему
+снимает полную глубину). Сопротивление на зелёной полосе SHORT / BEEP в
+режиме диода обведено чёрным контуром.
 
 ## v0.4.23-S2084 (2026-11-12)
 

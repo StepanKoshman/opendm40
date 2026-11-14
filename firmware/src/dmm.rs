@@ -445,9 +445,9 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   DC V      r3      1000 V (10000 counts)    60.4         6.0         no (HV divider self-heating)
 //   DC mV     r1      600 mV                   60.4         6.0         yes
 //   DC mV     r0      60 mV (OP1 x10)          60.4         6.0         no (0.1 uV step: amp noise, EMF)
-//   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         yes (owner 2026-11-14; 0.1 uV across the shunt: thermal EMF)
-//   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         yes (owner 2026-11-14; window 16)
-//   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         yes (owner 2026-11-14; window 16)
+//   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         no (0.1 uV across the shunt; tried 2026-11-14, owner: dropped)
+//   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         no
+//   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         no
 //   ohm       r0      60 ohm (Rref 0.1k)       75.5 (1 mohm) 7.5        no (already mohm)
 //   ohm       r1..r3  600 ohm .. 60 kohm       75.5         7.5         yes (r1: 600.000 ohm = mohm)
 //   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         yes (owner 2026-11-14; hum / leakage: shield the leads)
@@ -488,9 +488,8 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   rate    DC V / mV / A AD1 R22          ohm in range   code window (step reset ~2 counts)    readings
 //   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
 //           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
-//   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1 / A: 8 (1.6 s),      5/s DC, ohm 2.5/s
-//   (dflt)                                                 mA / uA: 16 (3.2 s), ohm r0..r6:
-//                                                          16 (6.4 s), others none
+//   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1: 8 (1.6 s),          5/s DC, ohm 2.5/s
+//   (dflt)                                                 ohm r0..r6: 16 (6.4 s), others none
 //   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
 //                                                          32, 12.8 s)
 // Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
@@ -567,11 +566,10 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
         return None;
     }
     let (medium, thr, ext) = match (mode, range) {
-        (1, 0..=2) | (3, 1) | (7, _) => (8, 120, true),
-        (1 | 3, _) => (1, 120, false),
-        // mA / uA: half the codes per count of V, so twice the window.
-        (8, _) => (16, 60, true),
-        (9, _) => (16, 57, true),
+        (1, 0..=2) | (3, 1) => (8, 120, true),
+        (1 | 3 | 7, _) => (1, 120, false),
+        (8, _) => (1, 60, false),
+        (9, _) => (1, 57, false),
         (10, 0) => (16, 150, false),
         (10, 1..=5) => (16, 150, true),
         (10, 6) => (16, 240, true),
@@ -8614,17 +8612,16 @@ mod tests {
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 2), Some((16, 150, true)));
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 0), Some((16, 150, false)));
         assert_eq!(avg_cfg(Rate::Medium, false, 1, 3), None);
-        // A / mA / uA and ohm up to 60 Mohm (owner 2026-11-14).
-        assert_eq!(avg_cfg(Rate::Medium, false, 7, 0), Some((8, 120, true)));
-        assert_eq!(avg_cfg(Rate::Medium, false, 8, 0), Some((16, 60, true)));
-        assert_eq!(avg_cfg(Rate::Medium, false, 9, 1), Some((16, 57, true)));
+        // Ohm up to 60 Mohm (owner 2026-11-14); not A / mA / uA.
+        assert_eq!(avg_cfg(Rate::Medium, false, 7, 0), None);
+        assert_eq!(avg_cfg(Rate::Medium, false, 8, 0), None);
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 5), Some((16, 150, true)));
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 6), Some((16, 240, true)));
         // SLOW: every AD1 DC range, longer.
         assert_eq!(avg_cfg(Rate::Slow, false, 1, 0), Some((16, 120, true)));
         assert_eq!(avg_cfg(Rate::Slow, false, 1, 3), Some((16, 120, false)));
-        assert_eq!(avg_cfg(Rate::Slow, false, 8, 1), Some((16, 60, true)));
-        assert_eq!(avg_cfg(Rate::Slow, false, 9, 0), Some((16, 57, true)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 8, 1), Some((16, 60, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 9, 0), Some((16, 57, false)));
         assert_eq!(avg_cfg(Rate::Slow, false, 10, 3), Some((32, 150, true)));
         assert_eq!(avg_cfg(Rate::Slow, false, 10, 6), Some((16, 240, true)));
         // FAST, AC+DC, other functions: none.
@@ -8666,7 +8663,7 @@ mod tests {
         assert!(ext_possible(Rate::Slow, false, 10, 3));
         assert!(ext_possible(Rate::Slow, false, 10, 4));
         assert!(!ext_possible(Rate::Slow, false, 10, 0));
-        assert!(ext_possible(Rate::Medium, false, 8, 0));
+        assert!(!ext_possible(Rate::Medium, false, 8, 0));
     }
 
     #[test]
