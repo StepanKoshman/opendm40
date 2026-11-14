@@ -3628,6 +3628,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+            rbox_text(ZERO_BTN, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Zero cal", C_WHITE);
         }
         // opendm40: the protocol decoder (ui_decode.rs).
         _ => dec::page(&v.dec, pc),
@@ -3635,6 +3636,8 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).
+/// Save tab: Zero cal (opendm40).
+pub const ZERO_BTN: Rect = rect(204, 78, 80, 30);
 // Trigger tab rows (opendm40, UF-13).
 pub const TT_LABEL: Rect = rect(24, 116, 180, 20);
 pub const TT_LIST: Rect = rect(24, 136, 180, 24);
@@ -3724,6 +3727,8 @@ pub enum MfHit {
     GenColour,
     PriScr,
     SaveCsv,
+    /// Save tab: the zero calibration (opendm40).
+    ZeroCal,
     /// The Decode tab's page.
     Dec(dec::SetupHit),
     /// Inside the box, nothing there.
@@ -3825,6 +3830,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::PriScr
             } else if near(rect(114, 78, 80, 30)) {
                 MfHit::SaveCsv
+            } else if near(ZERO_BTN) {
+                MfHit::ZeroCal
             } else {
                 MfHit::Inside
             }

@@ -1636,6 +1636,13 @@ While it is on, the edge trigger does not use the trigger hardware.
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Zero cal**: calibrates the scope's zero. The probe can stay where it
+  is: the scope switches to AC coupling, which keeps the probe's DC out, and
+  measures each hardware range in turn (about 15 s, the screen holds still
+  meanwhile). The correction applies in AC and DC and is kept over a
+  restart. A large AC signal on the input stops it with **Zero cal: signal
+  too large**; repeat it with the probe disconnected or shorted. Your scope
+  settings come back afterwards; **Zero calibrated** when done.
 - **Decode**: the [protocol decoder](#protocol-decoder).
 
 

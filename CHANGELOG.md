@@ -27,6 +27,15 @@ official opendm40 release. Not yet run on a real meter.
   is taken only when the last one is fully painted (linear records and the
   comparator ring; the stream, roll and wave view keep polling).
 
+### Added
+
+- **Scope: Zero cal** (MF > Settings, owner: a 1.5 mV offset on a shorted
+  probe, the same in AC and DC). Measures each hardware range's zero in AC
+  coupling, so the probe stays connected; the offset PWM then aims that much
+  lower and 0 V lands on the factory zero code (AC and DC). Kept in the
+  settings record (v12, 73 words: p[70..73]). The offset PWM's compare value
+  is now rounded, not truncated.
+
 ### Changed
 
 - **Scope: faster frames with the hardware trigger.** A running record
@@ -42,7 +51,8 @@ official opendm40 release. Not yet run on a real meter.
 обведено чёрным контуром; полоса стала на 2 px выше. Осциллограф: на
 экране всегда одна запись, без разрывов линии на AM / FM сигнале; с
 аппаратным триггером кадры идут чаще (запись только на экран и окно поиска,
-STOP по-прежнему снимает полную глубину).
+STOP по-прежнему снимает полную глубину). Калибровка нуля осциллографа
+(MF > Settings > Zero cal) без замыкания щупа.
 
 ## v0.4.23-S2084 (2026-11-12)
 

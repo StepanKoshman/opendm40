@@ -485,6 +485,28 @@ pub struct Frame<'a> {
     pub seq: u32,
 }
 
+/// The user's zero calibration (opendm40, owner 2026-11-14: a 1.5 mV offset
+/// on a shorted probe): per hardware range, where 0 V really lands minus
+/// where the factory calibration puts it, in half ADC codes. The offset
+/// PWM aims that much lower (`apply`), so 0 V sits on the factory zero code
+/// and every conversion stays the factory one. Settings > Save > Zero cal
+/// (scope_page.rs sp_zero_*) measures it; the settings record keeps it.
+static mut ZTRIM: [i8; 10] = [0; 10];
+
+fn ztrim() -> &'static mut [i8; 10] {
+    // SAFETY: main loop only.
+    unsafe { &mut *core::ptr::addr_of_mut!(ZTRIM) }
+}
+
+/// The zero calibration (persist).
+pub fn zero_trim() -> [i8; 10] {
+    *ztrim()
+}
+
+pub fn set_zero_trim(t: [i8; 10]) {
+    *ztrim() = t;
+}
+
 fn cal_pair(off: u32, i: usize, dflt: (f32, f32)) -> (f32, f32) {
     let a = off + 8 * i as u32;
     let (p0, p1) = (rec_f32(a), rec_f32(a + 4));
@@ -1123,6 +1145,22 @@ impl Scope {
         if !self.s.run && self.stored_valid { self.stored_range } else { self.s.range }
     }
 
+    /// Zero calibration of the live range (position 0): `mean` = the mean
+    /// code of a record with 0 V at the input. Adds its error to the trim
+    /// and returns it (codes); None (nothing changed): more than 48 codes
+    /// off, not a zero input.
+    #[inline(never)] // .cold (link-native.x): the zero calibration
+    pub fn zero_add(&mut self, mean: f32) -> Option<f32> {
+        let r = self.s.range;
+        let e = mean - self.gain(r).1;
+        let t = ztrim()[r] as f32 + 2.0 * e;
+        if !(e.abs() <= 48.0) || !(t.abs() <= 127.0) {
+            return None;
+        }
+        ztrim()[r] = (t + if t < 0.0 { -0.5 } else { 0.5 }) as i8;
+        Some(e)
+    }
+
     /// Voltage of ADC code g1 (stock v_c = pos * X / 141, FUN_080301a0): the
     /// offset PWM (apply) puts 0 V at code g1 - pos*..., so code g1 sits on
     /// the centre row whatever the position, and the position is already in
@@ -1446,10 +1484,10 @@ impl Scope {
         // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
         let r = s.range;
         let (g0, g1) = self.gain(r);
-        let code_t = g1 - s.pos as f32 * (4.0 * s.vdiv1() / XR[r]) * (g0 - g1) / 141.0;
+        let code_t = g1 - s.pos as f32 * (4.0 * s.vdiv1() / XR[r]) * (g0 - g1) / 141.0 - ztrim()[r] as f32 / 2.0;
         let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
         let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
-        let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
+        let ccr = if ccr.is_finite() && ccr > 0.0 { (ccr + 0.5).min(20000.0) as u32 } else { 0 };
         unsafe { w32(TIM3 + 0x3C, ccr) };
         let (_, num, den, ppp) = TB[s.tb];
         self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);

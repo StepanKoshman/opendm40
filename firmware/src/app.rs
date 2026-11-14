@@ -2382,6 +2382,10 @@ impl App {
         for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
             *w = c as u32;
         }
+        // v12: the scope's zero calibration (scope.rs ZTRIM; 0 = none).
+        for (i, t) in scope::zero_trim().iter().enumerate() {
+            p[crate::persist::W_SCOPE_ZERO + i / 4] |= (*t as u8 as u32) << (8 * (i % 4));
+        }
         p
     }
 
@@ -2534,6 +2538,12 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
+        // v12: the scope's zero calibration, a preference (0 = none).
+        let mut zt = [0i8; 10];
+        for (i, t) in zt.iter_mut().enumerate() {
+            *t = (p[crate::persist::W_SCOPE_ZERO + i / 4] >> (8 * (i % 4))) as u8 as i8;
+        }
+        scope::set_zero_trim(zt);
         // The probe factor: a preference (the probe stays on the jack),
         // kept also without Mode Remember (owner 2026-11-03).
         let pr = f32::from_bits(p[8]);
@@ -2889,6 +2899,10 @@ impl App {
             }
             if self.sp.autoset.is_some() {
                 self.autoset_step(&f, now);
+                return;
+            }
+            if scope_page::zero_cal_on() {
+                self.sp_zero_step(&f, now);
                 return;
             }
             // A stopped scope only emits a frame on a change (a zoom, a V/div

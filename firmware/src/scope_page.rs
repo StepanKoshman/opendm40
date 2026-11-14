@@ -51,6 +51,25 @@ use crate::scope_ui::{self as su, Model};
 use crate::stockfont::{self as sf, rect, Rect};
 use crate::touch::Point;
 
+/// The zero calibration in progress (`sp_zero_start`): the range measured,
+/// records seen since its settle time `t`, the time limit, the settings to
+/// restore.
+pub(super) struct ZeroCal {
+    r: u8,
+    k: u8,
+    t: u64,
+    end: u64,
+    saved: scope::Settings,
+}
+
+pub(super) static mut ZC: Option<ZeroCal> = None;
+
+/// A zero calibration runs (its records are not shown).
+pub(super) fn zero_cal_on() -> bool {
+    // SAFETY: main loop only.
+    unsafe { (*core::ptr::addr_of!(ZC)).is_some() }
+}
+
 /// Guide lines stay this long after the last drag event / release (stock).
 const GUIDE_MS: u64 = 2000;
 /// UF-09: two taps within this time (and 30 px) are a double tap.
@@ -2978,6 +2997,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::ZeroCal => {
+                self.sp_popup_close();
+                self.sp_zero_start(now);
+                return;
+            }
             su::MfHit::Dec(h) => {
                 self.dec_setup_tap(clk, h, now);
                 return;
@@ -3094,6 +3118,83 @@ impl App {
         as_log_clear();
         self.sp.autoset = Some(Autoset { phase: 1, idx: 0, round: 0, saved, settle: now + 200, abort: now + 15_000, refined: false, min_r: 0 });
         self.scope.apply(st, now);
+    }
+
+    /// Settings > Save > Zero cal (opendm40, owner 2026-11-14): the offset is
+    /// the same in AC and DC (owner), so it is behind the coupling capacitor
+    /// and is measured in AC: the probe's DC does not reach the front end,
+    /// nothing to short or unplug. Each hardware range in turn at position
+    /// 0, 2 ms/div (20 ms: whole 50 Hz periods of hum average out), AC,
+    /// Auto; after 800 ms (the relays, the offset PWM's filter, the coupling
+    /// capacitor) the second record's mean code sets the range's trim
+    /// (scope::zero_add), used in AC and DC. A clipped record (a large AC
+    /// signal) or one far off zero stops it, the ranges done so far kept.
+    #[inline(never)] // .cold (link-native.x)
+    pub(super) fn sp_zero_start(&mut self, now: u64) {
+        if self.scope.wave_on() {
+            return;
+        }
+        self.sp_end_hold(now);
+        // SAFETY: main loop only.
+        unsafe { ZC = Some(ZeroCal { r: 0, k: 0, t: 0, end: now + 30_000, saved: self.scope.s }) };
+        self.toast(now, "Zero cal...", true);
+        self.sp_zero_range(now);
+    }
+
+    fn sp_zero_range(&mut self, now: u64) {
+        // SAFETY: main loop only.
+        let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).as_mut() }) else { return };
+        let mut st = z.saved;
+        st.range = z.r as usize;
+        st.vzoom = 0;
+        st.pos = 0;
+        st.ac = true;
+        st.tb = 16;
+        st.mode = scope::TrigMode::Auto;
+        st.run = true;
+        st.ttype = 0;
+        st.tsrc = scope::TSRC_CH1;
+        z.t = now + 800;
+        z.k = 0;
+        self.scope_set(st, now);
+    }
+
+    /// One record during the zero calibration (App::scope_poll).
+    #[inline(never)] // .cold (link-native.x)
+    pub(super) fn sp_zero_step(&mut self, f: &scope::Frame, now: u64) {
+        // SAFETY: main loop only.
+        let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).as_mut() }) else { return };
+        let n = f.data.len();
+        if now < z.t || n < 16 {
+            if now > z.end {
+                self.sp_zero_end(now, "Zero cal: no records", false);
+            }
+            return;
+        }
+        z.k += 1;
+        if z.k < 2 {
+            return;
+        }
+        let (lo, hi) = f.data.min_max(0, n);
+        let sum: u64 = (0..n).map(|i| f.data.at(i) as u64).sum();
+        let ok = lo > 0 && hi < 1023 && self.scope.zero_add(sum as f32 / n as f32).is_some();
+        if !ok {
+            self.sp_zero_end(now, "Zero cal: signal too large", false);
+            return;
+        }
+        z.r += 1;
+        if z.r >= 10 {
+            self.sp_zero_end(now, "Zero calibrated", true);
+        } else {
+            self.sp_zero_range(now);
+        }
+    }
+
+    fn sp_zero_end(&mut self, now: u64, msg: &str, ok: bool) {
+        // SAFETY: main loop only.
+        let Some(z) = (unsafe { (*core::ptr::addr_of_mut!(ZC)).take() }) else { return };
+        self.scope_set(z.saved, now);
+        self.toast(now, msg, ok);
     }
 
     /// One record during AUTO-set.
