@@ -17,8 +17,19 @@ official opendm40 release. Not yet run on a real meter.
   so the orange reads clearly on the green. The band is 1 px taller at the
   top and at the bottom (y 37..64) to fit the outline.
 
+### Fixed
+
+- **Scope: one screen shows one record.** A trace that changes in every
+  column (a sine at 100-500 ns/div) is painted in 1.5 ms slices over several
+  main-loop passes; a new record was taken between the slices, so the
+  screen showed parts of several records and an AM / FM signal looked
+  broken where they met (owner, tinySA at 1 and 10 MHz). Now the next record
+  is taken only when the last one is fully painted (linear records and the
+  comparator ring; the stream, roll and wave view keep polling).
+
 Кратко: сопротивление на зелёной полосе SHORT / BEEP в режиме диода
-обведено чёрным контуром; полоса стала на 2 px выше.
+обведено чёрным контуром; полоса стала на 2 px выше. Осциллограф: на
+экране всегда одна запись, без разрывов линии на AM / FM сигнале.
 
 ## v0.4.23-S2084 (2026-11-12)
 

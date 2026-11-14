@@ -2842,6 +2842,21 @@ impl App {
         if !self.scope.acquiring() && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
             return;
         }
+        // The last frame is still being painted in slices (a busy trace at
+        // a fast timebase): finish it before taking the next record, else
+        // the slices draw a new record each and one screen shows parts of
+        // several (owner 2026-11-14, AM / FM at 100-200 ns/div: the trace
+        // broken where the slices met). The record waits in BUF.
+        // At most 32 passes held (a paint that never completes cannot stop
+        // the scope).
+        static HELD: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+        let held = HELD.load(core::sync::atomic::Ordering::Relaxed);
+        if page && !covered && held < 32 && crate::scope_ui::painting() && self.scope.may_wait() {
+            HELD.store(held + 1, core::sync::atomic::Ordering::Relaxed);
+            self.sp_paint_pass(now, covered);
+            return;
+        }
+        HELD.store(0, core::sync::atomic::Ordering::Relaxed);
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };

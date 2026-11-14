@@ -1993,6 +1993,8 @@ pub struct Graph {
     pub px: u32,
     /// Trace-only flush resumes at this column (`FLUSH_BUDGET`).
     next: u16,
+    /// A trace-only flush stopped at `next` (not all columns drawn yet).
+    part: bool,
     /// Digital phosphor (scope_dpo.rs): 0 off, 1 DPO (the trace colour's
     /// brightness), 2 HOT (heat colours); CH1 is drawn from its counts.
     pub dpo: u8,
@@ -2052,6 +2054,7 @@ static mut GRAPH: Graph = Graph {
     d_holes: [None; NH],
     px: 0,
     next: 0,
+    part: false,
     dpo: 0,
     d_dpo: 0,
 };
@@ -2122,6 +2125,12 @@ fn graph_ref() -> &'static Graph {
 /// The graph state (single-threaded firmware).
 pub fn graph() -> &'static mut Graph {
     unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) }
+}
+
+/// The last frame's paint is still in slices (`FLUSH_BUDGET`): part of the
+/// graph shows it, part the frame before.
+pub fn painting() -> bool {
+    graph().part
 }
 
 /// Row classes of the grid rule (`grid_on`), one byte per frame row
@@ -2338,6 +2347,7 @@ impl Graph {
         // Nothing changed (most main-loop passes): no per-column work.
         if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
+            self.part = false;
             return;
         }
         let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh || dm != self.d_dpo;
@@ -2444,6 +2454,7 @@ impl Graph {
             #[cfg(target_os = "none")]
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
+                self.part = true;
                 return;
             }
             let fx = i as i16 + 1;
@@ -2692,6 +2703,7 @@ impl Graph {
             }
         }
         self.next = 0;
+        self.part = false;
         crate::scope_dpo::done();
         self.d_dpo = dm;
         self.d_tr = self.tr;

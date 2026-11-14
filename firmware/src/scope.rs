@@ -2946,6 +2946,15 @@ impl Scope {
         self.wave
     }
 
+    /// The acquisition may skip polls (its record waits in BUF or the
+    /// hardware stops it): a linear record or the comparator's raw ring
+    /// (fs above PK_FS, not the software stream, not roll / wave view).
+    /// The page holds new frames back while the last one is still being
+    /// painted (App::scope_poll), so a screen never shows two records.
+    pub fn may_wait(&self) -> bool {
+        self.s.run && !self.wave && !self.rolling() && !self.stream && !rg().pk
+    }
+
     /// Start (or restart at another rate) the decoder's frame log stream
     /// (app_log.rs): BUF is lent (the stored record is gone), the DMA
     /// fills its first LOG_RING samples circularly at the table rate at or
