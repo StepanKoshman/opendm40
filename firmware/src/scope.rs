@@ -73,6 +73,53 @@ pub const CAP: usize = (43
     - cfg!(feature = "acdc-trace") as usize
     - cfg!(feature = "acdc-meth") as usize)
     * 1024;
+/// The digital phosphor's counts (scope_dpo.rs, 13 615 B) live in the last
+/// DPO_K samples of BUF, but only while the phosphor is shown (`dpo_eff`):
+/// the rings are then that much shorter (36 K raw, 55 688 packed). Roll,
+/// the wave view, the decoder's log and Persist other than DPO / HOT have
+/// the whole record (owner 2026-11-12). The claim changes in `start` only,
+/// where the record before is given up anyway.
+pub const DPO_K: usize = 7 * 1024 * cfg!(feature = "dpo") as usize;
+/// The tail is the phosphor's now / wanted by the page (Persist DPO / HOT).
+static DPO_MEM: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static DPO_WANT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Counts each claim (the phosphor zeroes its counts on a new one).
+static DPO_GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// A running comparator record's raw ring (samples; 0: the whole BUF,
+/// `capn`): only the screen and the trigger search window, so a frame is
+/// captured and packed in microseconds instead of a full record (43 K
+/// samples, ~0.9 ms at 50 MS/s, then packed) per frame (owner 2026-11-14:
+/// "the scope is less responsive than the stock"). A STOP takes a full
+/// capture of its own (stop_req), Single / DIGitize and the phosphor keep
+/// the whole ring. Set by `start` only.
+static SHORT_RING: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+/// The raw ring in flight: `SHORT_RING`, else the whole buffer.
+fn ringn() -> usize {
+    match SHORT_RING.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => capn(),
+        r => r.min(capn()),
+    }
+}
+/// Longest busy-wait for a short comparator record inside one poll (DWT
+/// cycles, 250 us at 200 MHz): arm and the edge plus the post part in the
+/// same pass when the signal repeats faster than that.
+const HW_SPIN: u32 = 50_000;
+
+/// BUF's samples for the rings in flight (CAP, less the phosphor's tail).
+#[inline]
+fn capn() -> usize {
+    if DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) { CAP - DPO_K } else { CAP }
+}
+
+/// The phosphor's memory (BUF's tail, DPO_K * 2 bytes) and its claim count,
+/// while it is claimed.
+pub fn dpo_tail() -> Option<(*mut u8, u32)> {
+    if DPO_K == 0 || !DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    // SAFETY: the rings in flight end at capn() (`start`).
+    Some((unsafe { (core::ptr::addr_of_mut!(DMA.buf) as *mut u8).add((CAP - DPO_K) * 2) }, DPO_GEN.load(core::sync::atomic::Ordering::Relaxed)))
+}
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
 pub const LOG_RING: usize = 16 * 1024;
@@ -88,6 +135,17 @@ pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::Atomic
 /// Packed ring (samples): what RB holds packed, less 15 bytes, at most
 /// the stock's 65 520-sample record (65 520 from CAP 42 K up).
 pub const PCAP: usize = if (RB - 15) * 8 / 10 > 65_520 { 65_520 } else { (RB - 15) * 8 / 10 };
+/// STG0 / RB / PCAP of the rings in flight (`capn`).
+#[inline]
+fn stg0() -> usize {
+    capn() - STG
+}
+fn rbn() -> usize {
+    (stg0() * 2 - 4) / 5 * 5
+}
+fn pcap() -> usize {
+    ((rbn() - 15) * 8 / 10).min(65_520)
+}
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;
@@ -109,7 +167,7 @@ const _: () = assert!(INRUSH_LEN <= CAP);
 /// frame (one complete linear record each) does not wait longer than
 /// before the record grew.
 fn lin_len(fs: u32) -> usize {
-    (fs as usize / 10).clamp(INRUSH_LEN, CAP)
+    (fs as usize / 10).clamp(INRUSH_LEN, capn())
 }
 /// Stale samples held at the front of a comparator ring record
 /// (dlog::scope_hold_head; device 2026-11-01 at 12.5 MS/s, also after the
@@ -411,7 +469,6 @@ impl Settings {
     }
 
     /// V/div at the x1 probe (the zoom applied).
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn vdiv1(&self) -> f32 {
         VSTEPS[self.vidx()]
     }
@@ -426,6 +483,28 @@ pub struct Frame<'a> {
     pub fs: u32,
     #[allow(dead_code)] // frame counter, not read by the firmware
     pub seq: u32,
+}
+
+/// The user's zero calibration (opendm40, owner 2026-11-14: a 1.5 mV offset
+/// on a shorted probe): per hardware range, where 0 V really lands minus
+/// where the factory calibration puts it, in half ADC codes. The offset
+/// PWM aims that much lower (`apply`), so 0 V sits on the factory zero code
+/// and every conversion stays the factory one. Settings > Save > Zero cal
+/// (scope_page.rs sp_zero_*) measures it; the settings record keeps it.
+static mut ZTRIM: [i8; 10] = [0; 10];
+
+fn ztrim() -> &'static mut [i8; 10] {
+    // SAFETY: main loop only.
+    unsafe { &mut *core::ptr::addr_of_mut!(ZTRIM) }
+}
+
+/// The zero calibration (persist).
+pub fn zero_trim() -> [i8; 10] {
+    *ztrim()
+}
+
+pub fn set_zero_trim(t: [i8; 10]) {
+    *ztrim() = t;
 }
 
 fn cal_pair(off: u32, i: usize, dflt: (f32, f32)) -> (f32, f32) {
@@ -1066,6 +1145,23 @@ impl Scope {
         if !self.s.run && self.stored_valid { self.stored_range } else { self.s.range }
     }
 
+    /// Zero calibration of the live range (position 0): `mean` = the mean
+    /// code of a record with 0 V at the input. Adds its error to the trim
+    /// and returns it (codes); None (nothing changed): more than 48 codes
+    /// off, not a zero input.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.zero_add")] // region A2: C and B are full
+    pub fn zero_add(&mut self, mean: f32) -> Option<f32> {
+        let r = self.s.range;
+        let e = mean - self.gain(r).1;
+        let t = ztrim()[r] as f32 + 2.0 * e;
+        if !(e.abs() <= 48.0) || !(t.abs() <= 127.0) {
+            return None;
+        }
+        ztrim()[r] = (t + if t < 0.0 { -0.5 } else { 0.5 }) as i8;
+        Some(e)
+    }
+
     /// Voltage of ADC code g1 (stock v_c = pos * X / 141, FUN_080301a0): the
     /// offset PWM (apply) puts 0 V at code g1 - pos*..., so code g1 sits on
     /// the centre row whatever the position, and the position is already in
@@ -1370,8 +1466,8 @@ impl Scope {
                 wv().restart = true;
                 wv().live = false;
             }
-            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, PCAP - 2600);
-            self.rec = PCAP;
+            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, pcap() - 2600);
+            self.rec = pcap();
             self.deadline = 0;
             return;
         }
@@ -1389,10 +1485,10 @@ impl Scope {
         // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
         let r = s.range;
         let (g0, g1) = self.gain(r);
-        let code_t = g1 - s.pos as f32 * (4.0 * s.vdiv1() / XR[r]) * (g0 - g1) / 141.0;
+        let code_t = g1 - s.pos as f32 * (4.0 * s.vdiv1() / XR[r]) * (g0 - g1) / 141.0 - ztrim()[r] as f32 / 2.0;
         let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
         let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
-        let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
+        let ccr = if ccr.is_finite() && ccr > 0.0 { (ccr + 0.5).min(20000.0) as u32 } else { 0 };
         unsafe { w32(TIM3 + 0x3C, ccr) };
         let (_, num, den, ppp) = TB[s.tb];
         self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);
@@ -1531,12 +1627,13 @@ impl Scope {
             if head > 0 && len > head {
                 // SAFETY: main loop, the DMA is stopped (raw ring of CAP).
                 let b = unsafe { &mut *core::ptr::addr_of_mut!(DMA.buf) };
-                let v = b[(off + head) % CAP] & 0x3FF;
+                let cap = ringn();
+                let v = b[(off + head) % cap] & 0x3FF;
                 for i in 0..head {
-                    b[(off + i) % CAP] = v;
+                    b[(off + i) % cap] = v;
                 }
             }
-            pack10::pack_in_place(base(), ((off + len).min(CAP) + 3) & !3);
+            pack10::pack_in_place(base(), ((off + len).min(ringn()) + 3) & !3);
         }
         r.off = off;
         // The coded ring's views: cap 0 (pack10::Codes).
@@ -1576,7 +1673,7 @@ impl Scope {
 
     /// Size of the ring in flight (samples).
     fn cap(&self) -> usize {
-        if rg().pk { PCAP } else { CAP }
+        if rg().pk { pcap() } else { ringn() }
     }
 
     /// The ring's samples oldest first, (first slot, count), from the next
@@ -1599,7 +1696,7 @@ impl Scope {
         // ms * S/s in u32 (fs <= PK_FS): samples in the gap, x 1000.
         let lost = (now.saturating_sub(r.t).min(100_000) as u32) * self.sample_rate() + 64_000 >= STG as u32 * 1000;
         r.t = now;
-        let stg = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[STG0..] };
+        let stg = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[stg0()..stg0() + STG] };
         let (mut rd, mut n) = (r.rd, self.roll_written);
         // Roll: the columns' min / max as the samples come (as wave_drain;
         // roll_poll draws them without reading the ring).
@@ -1655,7 +1752,8 @@ impl Scope {
 
     /// Raw ring: the next slot the DMA writes.
     fn raw_wr(&self) -> usize {
-        (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP
+        let cap = ringn();
+        (cap - unsafe { r32(S4 + 0x04) } as usize % (cap + 1)) % cap
     }
 
     /// HISR TCIF4 (the raw ring has wrapped, while the stream runs).
@@ -1747,6 +1845,9 @@ impl Scope {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         // Slow rates: the DMA fills the staging ring, the polls pack it.
         let pk = fs <= PK_FS;
+        // The phosphor's tail of BUF: taken / given back here only.
+        self.dpo_claim(self.dpo_eff());
+        SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         *rg() = Ring { pk, raw: !pk, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
         if pk {
             // Coded blocks for the long captures only (Single / DIGitize,
@@ -1757,7 +1858,7 @@ impl Scope {
         // Linear: Single / DIGitize take the record rec_split waits for.
         let (p, q) = self.rec_split();
         self.rec = lin_len(fs).max(p + q);
-        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32 + if pk { 2 * STG0 as u32 } else { 0 };
+        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32 + if pk { 2 * stg0() as u32 } else { 0 };
         let k_lin = crate::dlog::scope_stale_head(fs);
         unsafe {
             w32(LIFCR, 0x3D << 22);
@@ -1816,6 +1917,16 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
+            // A running comparator record: a ring of the screen, the search
+            // window and slack for a late edge (`SHORT_RING`).
+            if hw && !pk && !self.long_rec() && !self.one_shot && !self.stop_req && !self.dpo_eff() {
+                let n = self.screen + WIN + 64;
+                let r = (n + 1024 + 3) & !3;
+                if r < capn() {
+                    SHORT_RING.store(r, core::sync::atomic::Ordering::Relaxed);
+                    self.rec = n;
+                }
+            }
             // A raw linear record starts k_lin samples early in DMA.pre: the
             // ADC's stale output (dlog::scope_stale_head) is not recorded,
             // the record's sample 0 is TIM1 period k_lin. The rings (and the
@@ -1826,7 +1937,7 @@ impl Scope {
             let (len, circ) = if pk {
                 (STG as u32, 1 << 8)
             } else if ring {
-                (CAP as u32, 1 << 8)
+                (ringn() as u32, 1 << 8)
             } else {
                 ((self.rec + self.lin_pre) as u32, 0)
             };
@@ -1899,7 +2010,7 @@ impl Scope {
         };
         let n = top.min(lim).max(self.screen);
         let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
-        let q = if ring { (n - p).min(PCAP - 64 - WIN - pre) } else { n - p };
+        let q = if ring { (n - p).min(pcap() - 64 - WIN - pre) } else { n - p };
         (p.max(pre), q.max(post))
     }
 
@@ -2078,13 +2189,44 @@ impl Scope {
             return (off, len);
         }
         let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
-        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % CAP };
+        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % ringn() };
         (off, n)
+    }
+
+    /// A short comparator record (`SHORT_RING`) in flight.
+    fn short() -> bool {
+        SHORT_RING.load(core::sync::atomic::Ordering::Relaxed) != 0
+    }
+
+    /// A short comparator record: arm as soon as its pre-trigger part is in
+    /// and wait for the stop, at most HW_SPIN (a slower signal: the next
+    /// polls, as before).
+    #[inline(never)]
+    fn hw_spin(&mut self) {
+        let pre = hwtrig::pre_for(self.rec_split().0, WIN);
+        let t0 = unsafe { r32(DWT_CYCCNT) };
+        loop {
+            match self.hw.status() {
+                Status::Prepared => {
+                    if self.raw_tc() || self.raw_wr() >= pre {
+                        self.hw.arm();
+                    }
+                }
+                Status::Armed | Status::Fired => {}
+                Status::Done | Status::Off => return,
+            }
+            if unsafe { r32(DWT_CYCCNT) }.wrapping_sub(t0) > HW_SPIN {
+                return;
+            }
+        }
     }
 
     /// Hardware-trigger acquisition in flight: arm after the pre-trigger part,
     /// then wait for TIM2 to gate TIM1 off (Done) or for the Auto timeout.
     fn hw_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        if Self::short() {
+            self.hw_spin();
+        }
         let Some((wr, wrapped)) = self.pos(now) else {
             self.halt();
             return None;
@@ -2216,7 +2358,6 @@ impl Scope {
         r
     }
 
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn sample_rate(&self) -> u32 {
         if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
     }
@@ -2313,6 +2454,61 @@ impl Scope {
     /// Roll mode applies to the next acquisition: Roll on, a roll timebase,
     /// and no single record wanted (Single sweep, DIGitize), which captures
     /// a full linear record like the stock Single mode.
+    /// The phosphor has BUF's tail for the acquisition to come: wanted
+    /// (Persist DPO / HOT) and shown there (no roll, wave view or log).
+    fn dpo_eff(&self) -> bool {
+        DPO_K != 0 && DPO_WANT.load(core::sync::atomic::Ordering::Relaxed) && !self.roll_ok() && !self.wave && !self.log
+    }
+
+    /// Give BUF's tail to the phosphor (`on`) or back to the rings; a
+    /// change empties the coded ring (its length) and the stored record.
+    #[inline(never)] // .cold (link-native.x): a Persist change only
+    fn dpo_claim(&mut self, on: bool) {
+        if DPO_K == 0 || DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) == on {
+            return;
+        }
+        DPO_MEM.store(on, core::sync::atomic::Ordering::Relaxed);
+        DPO_GEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        crate::cring::init(base(), rbn() as u32);
+        self.stored_valid = false;
+    }
+
+    /// The page's Persist DPO / HOT (each pass): a change restarts a
+    /// running acquisition, so `start` moves the tail.
+    pub fn dpo_want(&mut self, on: bool) {
+        DPO_WANT.store(on, core::sync::atomic::Ordering::Relaxed);
+        if self.dpo_eff() != DPO_MEM.load(core::sync::atomic::Ordering::Relaxed) && self.s.run && self.busy && !self.stop_req && !self.one_shot && !self.wave && !self.log && !self.lent {
+            self.halt();
+        }
+    }
+
+    /// The digital phosphor's further screens of one record: the next
+    /// triggered screen after `prev` (the frame just emitted or the screen
+    /// this returned before), at least a screen later, with the trigger
+    /// point at the same column. Edge trigger on CH1 only; None: no more
+    /// (or `prev` is not a part of the record: a roll / columns frame).
+    #[inline(never)] // .cold (link-native.x): the search itself is find_trigger
+    pub fn dpo_next(&self, prev: &Codes) -> Option<Codes> {
+        if self.s.ttype != 0 || self.gen_src() || self.ch2_src() || self.wave {
+            return None;
+        }
+        let rec = self.rec_view();
+        let at = rec.offset_of(prev)?;
+        let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
+        let lo = at + self.screen + pre;
+        let hi = (rec.len() + pre).checked_sub(self.screen)?;
+        if lo >= hi {
+            return None;
+        }
+        let t = self.find_trigger(rec.sub(lo, hi))? + lo;
+        Some(rec.sub(t - pre, t - pre + self.screen))
+    }
+
+    /// The phosphor's tail is claimed (the page draws from its counts).
+    pub fn dpo_mem(&self) -> bool {
+        DPO_MEM.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
     fn roll_ok(&self) -> bool {
         self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot
     }
@@ -2478,7 +2674,10 @@ impl Scope {
                         self.auto_timeout()
                     };
             }
-            return None;
+            // A short comparator record: arm and wait for it in this pass.
+            if !(self.hw_mode && Self::short()) {
+                return None;
+            }
         }
         if self.rolling {
             return self.roll_poll(now);
@@ -2515,7 +2714,7 @@ impl Scope {
             return self.pk_drain(now).then_some(self.roll_written);
         }
         let wr = self.raw_wr();
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        let d = (wr + capn() - self.roll_last_wr) % capn();
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         Some(self.roll_written)
@@ -2806,6 +3005,7 @@ impl Scope {
 impl Scope {
     /// Source DMM on (the MCX acquisition stops; its settings are kept for
     /// `wave_exit`); the wave view's own settings come back.
+    #[inline(never)] // .cold (link-native.x): entering the wave view
     pub fn wave_enter(&mut self, sc: WaveScale, now: u64) {
         if self.wave {
             self.wave_scale(sc);
@@ -2819,6 +3019,8 @@ impl Scope {
         wv().mcx = self.s;
         self.stored_valid = false;
         self.wave = true;
+        self.dpo_claim(false);
+        SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         wv().sc = sc;
         wv().fs = 0; // apply: restart at the timebase's rate
         let mut s = ws;
@@ -2829,6 +3031,7 @@ impl Scope {
 
     /// Back to the MCX source with its settings (the stored wave record is
     /// dropped: BUF belongs to the MCX acquisition again).
+    #[inline(never)] // .cold (link-native.x): leaving the wave view
     pub fn wave_exit(&mut self, now: u64) {
         if !self.wave {
             return;
@@ -2847,16 +3050,29 @@ impl Scope {
         self.wave
     }
 
+    /// The acquisition may skip polls (its record waits in BUF or the
+    /// hardware stops it): a linear record or the comparator's raw ring
+    /// (fs above PK_FS, not the software stream, not roll / wave view).
+    /// The page holds new frames back while the last one is still being
+    /// painted (App::scope_poll), so a screen never shows two records.
+    pub fn may_wait(&self) -> bool {
+        self.s.run && !self.wave && !self.rolling() && !self.stream && !rg().pk
+    }
+
     /// Start (or restart at another rate) the decoder's frame log stream
     /// (app_log.rs): BUF is lent (the stored record is gone), the DMA
     /// fills its first LOG_RING samples circularly at the table rate at or
     /// above `fs` (at most LOG_FS_MAX). The front end stays as the scope
     /// set it. Returns the rate.
     #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
+    #[inline(never)] // .cold (link-native.x): the decoder's log starts
     pub fn log_begin(&mut self, fs: u32, now: u64) -> u32 {
         if !self.log {
             self.lend_buf();
             self.log = true;
+            // The log's memory is BUF to its end (`log_mem`).
+            self.dpo_claim(false);
+            SHORT_RING.store(0, core::sync::atomic::Ordering::Relaxed);
         } else {
             self.halt();
         }

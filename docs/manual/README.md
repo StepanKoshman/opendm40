@@ -815,8 +815,8 @@ while the input is steady (each time a 0.2 s pause in the readings). A
 reading in the first 2 s on a range can be a little off. FAST is a little
 noisier than MED; for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW 12.8 s;
-no extra digit on 60 Ω). After a step of the input or a range change the
+In Ω the averages are longer: 6.4 s in MED on every range, in SLOW
+12.8 s from 60 Ω to 60 kΩ and 6.4 s above (no extra digit on 60 Ω). After a step of the input or a range change the
 average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -835,9 +835,10 @@ average restarts, so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears after the main digits on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ, about 1.6 s (MED in
-DC) or 3.2 s (SLOW, and in Ω) after the input settles. Wherever it can
-appear, the reading starts further left, so the other digits never move.
+DC 600 mV, 6 V, 60 V, 600 V and every Ω range from 600 Ω to 60 MΩ, about
+1.6 s (MED in DC) or 3.2 s (SLOW, and in Ω) after the input settles. From
+600 kΩ mains hum and leakage dominate it (shielded leads help). Wherever it
+can appear, the reading starts further left, so the other digits never move.
 
 #### Smoothing
 
@@ -1334,7 +1335,11 @@ in the left or right half of the graph steps), **Off**.
 - Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
-    readings, not the hardware.
+    readings, not the hardware. **Type**: **Vol** (volts) or **Cur**
+    (amperes, for a current probe or shunt: the probe factor then means
+    amperes per volt at the input, so ×10 reads a 100 mV/A clamp). With
+    **Cur** the CH1 V/div, the trigger level, the measurements, the cursors
+    and the CSV are in A (Ip-p, Imax ...). Kept over a restart.
   - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Tap the **CH1** title again with the popup open to hide CH1: no trace and
   no **A** marker, the block dimmed. CH1 is still recorded, so the trigger
@@ -1561,8 +1566,33 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Hi-res** on / off; **Persist** OFF,
+MIN, 1S, INF, DPO, HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Hi-res** draws the mean of the samples in each screen column instead of
+the band from their smallest to their largest: less noise on the trace, the
+more samples a column has (2 or more; not in roll). A spike shorter than a
+column is averaged away, so switch it off to look for glitches. The
+measurements and the CSV are not changed by it.
+
+**Wide graph.** A swipe right on the right panel hides it: the graph's 10
+divisions stretch over the whole screen and the measurement bar gets a 5th
+cell. A swipe left from the screen's right edge brings the panel back (a
+press on the trigger level marker there still drags it). The combined view
+keeps the panel; the setting is not kept over a restart. MF > Measure takes
+up to 5 items; the normal bar shows the first 4.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
+1 column x 4 rows: bright where the trace runs in most frames, dim where it
+went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour
+in 12 brightness steps, **HOT** blue (rare) to red (always). A trace that is
+gone fades in about 40 frames (about a second). On the fast timebases every
+triggered screen of a record is added, not only the shown one, so a rare
+event appears at once. A drag, a pinch, a settings change, roll and STOP
+show the plain trace and start the count over. While DPO / HOT is on the
+scope record is 7 K samples shorter (36 K; 55 688 on the slow timebases):
+the counts use the end of its memory. Roll and the other Persist settings
+have the whole record.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
@@ -1581,6 +1611,12 @@ measurements. Its zero line has a **2** marker on the left: drag
 it up or down to move the trace (double tap: back to the centre); the
 position is kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
+**V** / **A** choice beside **On** / **Off** on the Display tab sets CH2's
+unit and puts the multimeter into that function (V, or AC A) in one tap: V
+and A keep their last DC / AC coupling, except AC+DC and AUTO, which CH2
+cannot stream (V goes to DC, A to AC), and the power meter is left. Neither is
+selected while the multimeter is in another function. It does nothing in the
+Wave view or while a recording runs. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
@@ -1601,6 +1637,13 @@ While it is on, the edge trigger does not use the trigger hardware.
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Zero cal**: calibrates the scope's zero. The probe can stay where it
+  is: the scope switches to AC coupling, which keeps the probe's DC out, and
+  measures each hardware range in turn (about 15 s, the screen holds still
+  meanwhile). The correction applies in AC and DC and is kept over a
+  restart. A large AC signal on the input stops it with **Zero cal: signal
+  too large**; repeat it with the probe disconnected or shorted. Your scope
+  settings come back afterwards; **Zero calibrated** when done.
 - **Decode**: the [protocol decoder](#protocol-decoder).
 
 
@@ -1611,7 +1654,7 @@ While it is on, the edge trigger does not use the trigger hardware.
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+the probe tip (with CH1 type **Cur**: `time_s,amperes`, amperes). A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
@@ -2295,8 +2338,8 @@ Set in **Settings > Other > USB disk**.
   read-only.
 
 A change of the mode takes effect at the next USB plug: unplug the cable
-and plug it in again. Until then the row shows **(replug)**. The meter
-always starts in **Files live**.
+and plug it in again. Until then the row shows **(replug)**. The mode is
+kept over a restart: the meter starts in the mode it was left in.
 
 A file manager usually moves a deleted file to the trash. A file moved to
 the trash is deleted on the meter at the eject, unless you take it out of
@@ -2469,7 +2512,7 @@ goes back to the main menu.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
-| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
+| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Kept over a restart. |
 | **Device info** | | | Opens the [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Help** | | | The [on-screen help](#on-screen-help). |
@@ -2981,7 +3024,7 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
+| All [settings](#settings), **USB disk** included; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
 | Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep; the scope's probe factor | Scope: the timebase, V/div, coupling, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |

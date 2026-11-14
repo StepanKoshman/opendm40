@@ -46,8 +46,13 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v11: 70 words; p[64..70] W_TOUCH_CAL, the touch calibration
 /// (touchcal.rs Cal: Q16 deltas from the identity; 0 = none, so v10 loads
 /// zero-extended as the identity).
-pub const VERSION: u32 = 11;
-pub const WORDS: usize = 70;
+/// v12: 73 words; p[70..73] W_SCOPE_ZERO, the scope's zero calibration
+/// (scope::zero_trim, ten i8 half codes; 0 = none, v11 loads zero-extended).
+pub const VERSION: u32 = 12;
+pub const WORDS: usize = 73;
+const V11_WORDS: usize = 70;
+/// The scope's zero calibration (3 words; a preference, as the touch one).
+pub const W_SCOPE_ZERO: usize = 70;
 const V10_WORDS: usize = 64;
 /// The touch calibration (6 words, touchcal::Cal; a preference).
 pub const W_TOUCH_CAL: usize = 64;
@@ -106,6 +111,7 @@ const V2_WORDS: usize = 16;
 pub fn words_of(version: u32) -> Option<usize> {
     Some(match version {
         VERSION => WORDS,
+        11 => V11_WORDS,
         10 => V10_WORDS,
         9 => V9_WORDS,
         8 => V8_WORDS,

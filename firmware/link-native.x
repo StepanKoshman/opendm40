@@ -294,6 +294,8 @@ SECTIONS
         /* The ohm / diode test-current label: drawn on a function / range /
          * variant change only (no AD2 stream runs in ohm / diode). */
         *(.text.*8opendm402ui18test_current_label*);
+        /* The diode's aux2 on the beeper band: drawn on a change only. */
+        *(.text.*8band_aux*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
@@ -369,6 +371,20 @@ SECTIONS
          * (scope_ui::init_shown) and the backup-SRAM record set-up
          * (persist::init, also splash / setfile::boot). */
         *(.text.*8opendm408scope_ui10init_shown*);
+        /* opendm40 fork 0.4.21: rarely run scope code out of region B (a
+         * Persist change, entering / leaving the wave view, the decoder's
+         * log start, a tap on the MF popup). */
+        *(.text.*8opendm405scope*9dpo_claim*);
+        *(.text.*8opendm405scope*10wave_enter*);
+        *(.text.*8opendm405scope*9wave_exit*);
+        *(.text.*8opendm405scope*9log_begin*);
+        *(.text.*8opendm409scope_dpo5clear*);
+        /* The phosphor's further screens of a record: the loops' work is
+         * in region B (pack10::min_max, scope_dpo::hit, find_trigger). */
+        *(.text.*8opendm405scope*8dpo_next*);
+        *(.text.*8opendm405scope*7hw_spin*);
+        *(.text.*11sp_dpo_more*);
+        *(.text.*8opendm408scope_ui6mf_hit*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);

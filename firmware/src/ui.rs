@@ -50,9 +50,11 @@ pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-1
 /// the stock RUN green (`gen_status`).
 pub const SHORT_BG: Color = 0x04A9;
 pub const SHORT_FG: Color = 0x07E0;
-/// The indicator's band over the aux row (y 38..63, as the temperature
-/// chip): 4 px under the status bar and above the digits' cells (68).
-pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
+/// The indicator's band over the aux row (y 37..64): 3 px under the status
+/// bar and above the digits' cells (68). opendm40: 1 px taller each way than
+/// the temperature chip (38..63), for the outlined diode value on it
+/// (`band_aux`: 20 px digits plus their 1 px outline, 3 px inside).
+pub const SHORT_RECT: sf::Rect = rect(8, 37, 464, 28);
 /// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
 /// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
 /// others (`set_short_style`, the PR's comparison).
@@ -353,6 +355,9 @@ pub struct DmmView {
     /// pattern); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
+    /// The last aux2 for the beeper band (`band_aux`): drawn on it as soon
+    /// as the band appears.
+    band_v: Option<(crate::dmm::Val, Color)>,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -650,6 +655,7 @@ impl DmmView {
             acc_drawn: false,
             short: 0,
             short_drawn: 0,
+            band_v: None,
         }
     }
 
@@ -668,7 +674,9 @@ impl DmmView {
         }
         self.short_drawn = want;
         let b = SHORT_RECT;
-        if want != 0 {
+        if want != 0 && self.band_v.is_some() {
+            // With aux2 on it (`band_aux` paints the band).
+        } else if want != 0 {
             sf::rbox(b, 6, SHORT_BG, BG);
             // The scope's 26 px face (the status bar's F21 lacks B / E).
             sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
@@ -681,6 +689,40 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.last_aux = [false; 2];
         self.last_iohm = 255;
+        // The band: aux2 on it at once (the next reading may be 100 ms off).
+        if want != 0 {
+            if let Some((v, c)) = self.band_v {
+                self.band_aux(&v, c);
+            }
+        }
+    }
+
+    /// aux2 on the beeper indicator's band (`reading`): the value right-
+    /// aligned in 285..396 (clear of the centred SHORT / BEEP, which ends
+    /// at ~280), the unit from 403 to the band's rounded end, on the band's
+    /// green, outlined in black (owner 2026-11-12); drawn on a change
+    /// (`short_sync` forgets it).
+    #[inline(never)] // .cold (link-native.x): drawn on a change only
+    fn band_aux(&mut self, v: &crate::dmm::Val, col: Color) {
+        let mut t = [0u8; 16];
+        let txt = meter::text(&mut t, v);
+        let mut key = [0u8; 16];
+        let kn = txt.len().min(16);
+        key[..kn].copy_from_slice(&txt.as_bytes()[..kn]);
+        let vkey = Some((key, 0x80 | (col == VALUE_PROV) as u8));
+        if self.aux_val[1] == vkey {
+            return;
+        }
+        self.aux_val[1] = vkey;
+        // The whole band again (its text on its own fill, as SHORT / BEEP:
+        // a changed value leaves nothing behind).
+        let b = SHORT_RECT;
+        sf::rbox(b, 6, SHORT_BG, BG);
+        sf::glyphs(sf::ASCII26, b, if self.short_drawn == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+        sf::glyphs_outlined(sf::F21, rect(285, b.y, 112, b.h), txt, col, 0x0000, SHORT_BG, 4, 0);
+        let mut u = [0u8; 16];
+        let ut = sf::unit_text(v.unit, &mut u);
+        sf::glyphs_outlined(sf::F21, rect(403, b.y, b.x + b.w - 7 - 403, b.h), ut, VALUE, 0x0000, SHORT_BG, 1, 0);
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -997,8 +1039,14 @@ impl DmmView {
         let band = self.band();
         if band {
             // The beeper indicator's band holds the row (`short_sync`).
+            // opendm40 (owner 2026-11-07): aux2 (the diode's resistance)
+            // stays readable on it, in its own colour.
+            if let Some(v) = aux[1].filter(|_| !lp && bd != Some(1) && !r.parts()) {
+                self.band_aux(&v, vcol);
+            }
             aux = [None; 2];
         }
+        self.band_v = aux_shown(r).0[1].filter(|_| !lp && bd != Some(1) && !r.parts()).map(|v| (v, vcol));
         // Ohm / continuity / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
         // replaces it paints over the cleared box), drawn after them (the

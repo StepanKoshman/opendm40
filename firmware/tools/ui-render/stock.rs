@@ -289,9 +289,10 @@ pub fn emu_popvals(m: &Model) -> su::PopVals {
 /// Popup values of the reference scenes (tools/stock-ui Scene::default).
 pub fn popvals(m: &Model) -> su::PopVals {
     su::PopVals {
-        meas: [0, 10, 9, 11],
+        meas: [0, 10, 9, 11, 0],
         meas_n: 4,
         roll: false,
+        hires: false,
         persist: 0,
         bright: 100,
         grid: 50,
@@ -314,8 +315,10 @@ pub fn popvals(m: &Model) -> su::PopVals {
         dec: su::dec::SetupVals::DEFAULT,
         tsrc: 0,
         gen_trace: false,
+        cur: false,
         ch2_on: false,
         ch2_vdiv: su::Txt::EMPTY,
+        ch2_func: 0,
         meas_src2: false,
     }
 }

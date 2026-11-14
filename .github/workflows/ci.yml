@@ -81,6 +81,10 @@ jobs:
       # fail the build.
       - name: build.sh --locked
         run: firmware/build.sh --locked
+      # Flash use by module and function (a guide for cutting / moving
+      # code; not a check).
+      - name: Size report (tools/size-report.py)
+        run: python3 firmware/tools/size-report.py firmware/target/native/thumbv7em-none-eabihf/release/opendm40 "$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-nm"
       - name: Non-default feature sets (tools/build-variants)
         run: firmware/tools/build-variants/run.sh
       # The artifact: opendm40-<commit> for a push; for a pull request
