@@ -36,6 +36,11 @@ official opendm40 release. Not yet run on a real meter.
   settings record (v12, 73 words: p[70..73]). The offset PWM's compare value
   is now rounded, not truncated.
 
+- **DMM: the extra digit on DC A, mA, µA and Ω 600 kΩ .. 60 MΩ** (owner).
+  MED / SLOW average them like DC V (A: 8 conversions; mA / µA, with half
+  the codes per count: 16; Ω 600 kΩ .. 60 MΩ: 16, MED 6.4 s). Ω 60 Ω and
+  60 mV still go without it.
+
 ### Changed
 
 - **Scope: faster frames with the hardware trigger.** A running record
@@ -52,7 +57,8 @@ official opendm40 release. Not yet run on a real meter.
 экране всегда одна запись, без разрывов линии на AM / FM сигнале; с
 аппаратным триггером кадры идут чаще (запись только на экран и окно поиска,
 STOP по-прежнему снимает полную глубину). Калибровка нуля осциллографа
-(MF > Settings > Zero cal) без замыкания щупа.
+(MF > Settings > Zero cal) без замыкания щупа. Шестой разряд в DC A, mA,
+µA и в Ω от 600 kΩ до 60 MΩ.
 
 ## v0.4.23-S2084 (2026-11-12)
 
