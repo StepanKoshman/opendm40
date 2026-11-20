@@ -22,6 +22,13 @@ official opendm40 release.
   sounds. While the current flows the reading is about 80 ppm off (the
   probe's converter next to it), under the red alert.
 
+- **"No disk" on newer units** (BoyaMicro BY25Q128ES flash, a user's
+  report): they come with a FAT12 disk, opendm40 needs the DM40 FAT16 one.
+  The first boot converts it in place (fat16conv.rs): the files (LOGO.JPG,
+  CONFIG.BIN, ...) are kept, only the boot sector, FATs and root are
+  rewritten; screenshots, records and logs then work. DBG:FLASH? reports the
+  result.
+
 ### Changed
 
 - **Scope: 8-bit digital phosphor** (owner). Persist DPO / HOT count hits
@@ -64,6 +71,9 @@ official opendm40 release.
 средним, измерения уровней (Vpp и др.) по усреднённому сигналу без шума. Новый
 6-разрядный частотомер (MF > Trigger > Counter) в правом верхнем углу
 графика.
+На новых приборах с флешкой BY25Q128ES (диск FAT12) первая загрузка
+переводит диск в FAT16 с сохранением файлов: больше нет «No disk», работают
+скриншоты, записи и логи.
 
 ## v0.4.24-S2084 (2026-11-14)
 
