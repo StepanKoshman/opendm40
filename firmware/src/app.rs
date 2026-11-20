@@ -2810,6 +2810,10 @@ impl App {
             return;
         }
         self.sp_csv_poll(now);
+        // The frequency counter (fcnt.rs, region C: not under the AD2 stream).
+        if (self.scope.fcnt.want || self.scope.fcnt.running) && !crate::hy3131::streaming() {
+            self.scope.fcnt_poll(now);
+        }
         // The protocol decoder: a slice of a record decode (app_decode.rs).
         self.dec_step();
         // Drag / pinch on the scope page: no new frames and no acquisition

@@ -711,10 +711,10 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let add = if tab == 1 {
                 vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS), rb(scope_ui::C2_COLOUR), rb(scope_ui::GT_COLOUR)]
             } else {
-                vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
+                vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE), rb(scope_ui::CT_LABEL), rb(scope_ui::CT_NOTE)]
             };
-            let area = if tab == 1 { Bx::new(14, 161, 399, 99) } else { Bx::new(14, 186, 399, 50) };
-            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 241 } else { 216 }));
+            let area = if tab == 1 { Bx::new(14, 161, 399, 99) } else { Bx::new(14, 186, 399, 100) };
+            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 241 } else { 266 }));
             if !combined {
                 save(out, name);
             }
@@ -773,6 +773,26 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                 if !matches!(scope_ui::mf_hit(1, &pd, 160, 93), scope_ui::MfHit::HiRes(_)) {
                     ck.fail("gen/dpo-decay", "Hi-res lost its hit".to_string());
                 }
+            }
+            // Trigger > Counter (opendm40 0.4.25): its Off / On taps, the
+            // Source list keeps its own; the reading top right in the graph.
+            let ch = |i: i16| scope_ui::mf_hit(2, &pv, scope_ui::CT_LIST.x + 30 + 60 * i, scope_ui::CT_LIST.y + 12);
+            if !(matches!(ch(0), scope_ui::MfHit::Ctr(false)) && matches!(ch(1), scope_ui::MfHit::Ctr(true))) {
+                ck.fail("gen/counter", "Counter Off / On not hit".to_string());
+            }
+            if !matches!(scope_ui::mf_hit(2, &pv, scope_ui::TS_LIST.x + 30, scope_ui::TS_LIST.y + 12), scope_ui::MfHit::TSrc(0)) {
+                ck.fail("gen/counter", "Source CH1 lost its hit".to_string());
+            }
+            let mut pk = pv;
+            pk.ctr = true;
+            draw(&m, scope_ui::Popup::Mf(2), &pk, true);
+            save(out, "s08-counter-menu");
+            for (txt, name) in [("1.00000kHz", "s08-counter"), ("------Hz", "s08-counter-none")] {
+                let mut mk = m;
+                mk.ctr = scope_ui::Txt::new(txt);
+                draw(&mk, scope_ui::Popup::None, &pk, true);
+                ck.check_replica(&format!("gen/{name}"));
+                save(out, name);
             }
             // Not DPO / HOT: no Decay buttons.
             let mut po = pv;

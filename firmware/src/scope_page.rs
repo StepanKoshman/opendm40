@@ -649,6 +649,7 @@ impl App {
             ch2_pos: self.ch2.pos,
             gen_on: self.scope.gen_trace,
             gen_txt: self.gen_label(),
+            ctr: if wave || crate::hy3131::streaming() { su::Txt::EMPTY } else { su::Txt::new(self.scope.fcnt.text()) },
         }
     }
 
@@ -2556,6 +2557,7 @@ impl App {
             persist: self.sp.persist,
             hires: self.sp.hires,
             decay: self.sp.decay,
+            ctr: self.scope.fcnt.want,
             bright: self.sp.bright,
             grid: self.sp.grid,
             rising: s.rising,
@@ -2984,6 +2986,13 @@ impl App {
                 self.redraw = true;
             }
             su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
+            su::MfHit::Ctr(on) => {
+                // The next acquisition is a software-triggered one
+                // (scope.rs `hw`); fcnt_poll starts the counter after it.
+                self.scope.fcnt.want = on;
+                self.scope_set(st, now);
+                self.sp_settings_changed();
+            }
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
                 self.scope_set(st, now);
@@ -3445,6 +3454,8 @@ impl App {
         // [5] bits 24..26: Display > Decay (scope_dpo::DECAY_MS index XOR
         // its default 1 s, so 0 = 1 s in older records).
         p[5] |= ((self.sp.decay ^ 1) as u32 & 7) << 24;
+        // [5] bit 27: Trigger > Counter.
+        p[5] |= (self.scope.fcnt.want as u32) << 27;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3479,6 +3490,7 @@ impl App {
         if p[3] >> 15 & 1 != 0 && crate::scope_dpo::ENABLED {
             self.sp.persist = 4 + (self.sp.persist & 1);
         }
+        self.scope.fcnt.want = p[5] >> 27 & 1 != 0;
         self.ch2.pos = (p[5] as u16 as i16).clamp(-392, 392);
         su::set_ch2_colour(((p[5] >> 16 & 0xF) as u8).min(su::NPAL as u8));
         su::set_gen_colour(((p[5] >> 20 & 0xF) as u8 ^ su::GEN_COLOUR_DEFAULT).min(su::NPAL as u8 - 1));

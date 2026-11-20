@@ -39,6 +39,15 @@ official opendm40 release.
   no noise in Vpp. Freq, widths and duty still use every sample; a clipped
   sample still voids Vpp / Vamp.
 
+### Added
+
+- **Scope: frequency counter** (owner). MF > Trigger > **Counter On**: CH1's
+  frequency with 6 digits in the top right corner of the graph, 4 values a
+  second, from the trigger comparator's edges at the trigger level
+  (reciprocal: TIM2 captures the edge times at 5 ns, TIM5 counts them).
+  While it is on the edge trigger is the software one. Kept in the
+  settings.
+
 ### Removed
 
 - **Touch calibration** (owner, to free flash): **Calibrate** on the touch
@@ -52,7 +61,9 @@ official opendm40 release.
 удалена, страница проверки сенсора осталась. DPO / HOT: 8-битный счётчик,
 логарифмическая яркость, настраиваемое затухание, в HOT вместо красного
 белый; запись в этом режиме 29 K точек. Hi-res: гладкая линия с дробным
-средним, измерения уровней (Vpp и др.) по усреднённому сигналу без шума.
+средним, измерения уровней (Vpp и др.) по усреднённому сигналу без шума. Новый
+6-разрядный частотомер (MF > Trigger > Counter) в правом верхнем углу
+графика.
 
 ## v0.4.24-S2084 (2026-11-14)
 

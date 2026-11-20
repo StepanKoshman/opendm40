@@ -468,6 +468,9 @@ pub struct Model {
     /// The GEN trace shown and its V/div: the GEN block.
     pub gen_on: bool,
     pub gen_txt: Txt,
+    /// The frequency counter's reading ("1.00000kHz"; MF > Trigger >
+    /// Counter, fcnt.rs), top right in the graph; empty = off.
+    pub ctr: Txt,
     /// The Wave view (the DMM as the scope's source): the CH1 block shows
     /// its function, the DMM block reads "MCX" (back to the OSC input).
     pub wave: bool,
@@ -558,6 +561,7 @@ impl Model {
         ch2_pos: 0,
         gen_on: false,
         gen_txt: Txt::EMPTY,
+        ctr: Txt::EMPTY,
         wave: false,
     };
 
@@ -2062,7 +2066,7 @@ static mut GRAPH: Graph = Graph {
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
 /// tabs, the FFT label and boxes, the cursor tab, an open popup's box, the
 /// rows `regraph_rows` leaves alone, the protocol decoder's band, the
-/// CH2 (DMM) label.
+/// frequency counter.
 const NH: usize = 12;
 pub const H_BUBBLE: usize = 0;
 pub const H_TAB_L: usize = 1;
@@ -2076,8 +2080,8 @@ pub const H_POPUP: usize = 8;
 const H_REST: usize = 9;
 /// The protocol decoder's band (ui_decode.rs).
 pub const H_DEC: usize = 10;
-/// The DMM CH2's label.
-pub const H_SPARE: usize = 11;
+/// The frequency counter's box (`ctr_rect`).
+pub const H_CTR: usize = 11;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -2896,6 +2900,12 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
     g.set_hole_at(H_DEC, (m.dec != 0).then(|| dec::band_rect(m.dec)));
+    let ctr_on = !m.ctr.as_str().is_empty();
+    if o.is_some_and(|o| o.ctr.as_str().is_empty() == ctr_on) {
+        // The box comes or goes: the graph under it again.
+        g.invalidate();
+    }
+    g.set_hole_at(H_CTR, ctr_on.then(|| ctr_rect(m)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2926,6 +2936,9 @@ pub fn update(m: &Model) {
     let was_fft = ol.math_on && ol.math_mode == 5;
     if fft_on && (bg_changed || d(!was_fft || ol.fft_hz != m.fft_hz || ol.math_colour != m.math_colour)) {
         fft_label(m);
+    }
+    if ctr_on && (bg_changed || d(ol.ctr != m.ctr || pal)) {
+        fft_box(ctr_rect(m), m.ctr.as_str(), m.pal_text());
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
@@ -2960,6 +2973,11 @@ pub fn fft_ydiv_rect(m: &Model) -> Rect {
 /// room beside it for "12.5MHz -99.9dBV").
 pub fn fft_peak_rect(m: &Model) -> Rect {
     rect(GR - 147, m.top() + 34, 144, 17)
+}
+/// The frequency counter (opendm40): top right, on the FFT label's row
+/// (the label is centred, x 200..260; the peak box is the row below).
+pub fn ctr_rect(m: &Model) -> Rect {
+    rect(GR - 95, m.top() + 13, 92, 17)
 }
 /// Horizontal scale box: bottom row (both views share the frame bottom),
 /// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
@@ -3290,6 +3308,8 @@ pub struct PopVals {
     pub hires: bool,
     /// Display > Decay (scope_dpo::DECAY_MS index; shown with DPO / HOT).
     pub decay: u8,
+    /// Trigger > Counter (fcnt.rs).
+    pub ctr: bool,
     /// 0 OFF 1 MIN 2 1S 3 INF.
     pub persist: u8,
     pub bright: u8,
@@ -3485,7 +3505,7 @@ pub fn slider_value(x: i16) -> f32 {
 /// MF popup page height per tab (box h = 40 + page).
 /// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13;
 /// Decode: ui_decode.rs.)
-const MF_PAGE_H: [i16; 5] = [150, 200, 175, 55, dec::PAGE_H];
+const MF_PAGE_H: [i16; 5] = [150, 200, 225, 55, dec::PAGE_H];
 
 /// The box a popup paints whole: a graph hole while it is open (a full
 /// repaint under an open popup does not draw the graph there first).
@@ -3634,6 +3654,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 crate::scope::TSRC_CH2 => fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, CH2 scale", C_FILL, 1, 0),
                 _ => {}
             }
+            ctr_row(pc, v.ctr);
         }
         3 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
@@ -3649,6 +3670,17 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
 /// Display tab: the two sliders and their values (repainted while dragged).
 /// Save tab: Zero cal (opendm40).
 pub const ZERO_BTN: Rect = rect(204, 78, 80, 30);
+/// Trigger > Counter (opendm40): off / on and what it counts.
+#[inline(never)] // .cold (link-native.x): the MF popup's Trigger tab
+fn ctr_row(pc: Rect, on: bool) {
+    fill_c(rect(14, 236, 399, 50), pc, C_POP_BG);
+    fill_text(CT_LABEL, pc, C_POP_BG, sf::SC_F16, CT_LABEL, "Counter:", C_FILL, 1, 0);
+    option_list(CT_LIST, pc, &["Off", "On"], 60, on as usize);
+    fill_text(CT_NOTE, pc, C_POP_BG, sf::SC_F16, CT_NOTE, "CH1, trigger level", C_FILL, 1, 0);
+}
+pub const CT_LABEL: Rect = rect(24, 238, 180, 20);
+pub const CT_LIST: Rect = rect(24, 258, 120, 24);
+pub const CT_NOTE: Rect = rect(214, 258, 189, 24);
 // Trigger tab rows (opendm40, UF-13).
 pub const TT_LABEL: Rect = rect(24, 116, 180, 20);
 pub const TT_LIST: Rect = rect(24, 136, 180, 24);
@@ -3733,6 +3765,8 @@ pub enum MfHit {
     /// Trigger source, GEN trace on (opendm40).
     TSrc(u8),
     GenTrace(bool),
+    /// Trigger > Counter off / on (opendm40).
+    Ctr(bool),
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
@@ -3832,6 +3866,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::TType(i)
             } else if let Some(i) = option_hit(TS_LIST, 3, 60, x, y) {
                 MfHit::TSrc(i)
+            } else if let Some(i) = option_hit(CT_LIST, 2, 60, x, y) {
+                MfHit::Ctr(i == 1)
             } else if v.ttype == crate::trigsoft::PULSE {
                 if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {
                     MfHit::PCond(i)

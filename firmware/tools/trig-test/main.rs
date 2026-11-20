@@ -22,6 +22,9 @@ mod mmio {
     pub unsafe fn modify32(_: u32, _: u32, _: u32) {}
 }
 #[allow(dead_code)]
+#[path = "../../src/fcnt.rs"]
+mod fcnt;
+#[allow(dead_code)]
 mod clock {
     pub fn delay_us(_: u32) {}
 }
@@ -137,6 +140,7 @@ fn main() {
     t("pulse window EQ 50 -> 48..52", pulse_window(EQ, 50.0) == (48, 52));
     t("pulse window EQ 10 -> 9..11", pulse_window(EQ, 10.0) == (9, 11));
     packed();
+    counter();
     // Comparator record (scope.rs hw_poll): armed after pre_for, stopped
     // post_rec samples after the edge -> exactly `rec` samples, the edge
     // estimate at pre_for, and every crossing of the refinement window
@@ -201,4 +205,47 @@ fn packed() {
         pack10::set(p, i, v);
     }
     t("pack10: set keeps the neighbours", pack10::get(p, 4) == d[4] && pack10::get(p, 5) == 1023 && pack10::get(p, 6) == 0 && pack10::get(p, 7) == 512 && pack10::get(p, 8) == d[8] && pack10::get(p, 3999) == 1 && pack10::get(p, 3998) == d[3998]);
+}
+
+/// fcnt.rs: the reciprocal arithmetic, the prescaler and the 6-digit text.
+fn counter() {
+    let f = |hz: Option<f32>| {
+        let mut b = [0u8; 12];
+        let n = fcnt::fmt6(hz, &mut b);
+        String::from_utf8(b[..n].to_vec()).unwrap()
+    };
+    let cases: [(f32, &str); 12] = [
+        (1000.0, "1.00000kHz"),
+        (50.0, "50.0000Hz"),
+        (12_345_600.0, "12.3456MHz"),
+        (999_999.0, "999.999kHz"),
+        (999_999.6, "1.00000MHz"),
+        (9.999_999, "10.0000Hz"),
+        (99.999_996, "100.000Hz"),
+        (0.5, "0.50000Hz"),
+        (1.0, "1.00000Hz"),
+        (123.456_7, "123.457Hz"),
+        (2_500.0, "2.50000kHz"),
+        (60.0, "60.0000Hz"),
+    ];
+    for (hz, want) in cases {
+        let got = f(Some(hz));
+        t(&format!("fmt6 {hz} -> {want} ({got})"), got == want);
+    }
+    t("fmt6 none", f(None) == "------Hz");
+    t("fmt6 NaN", f(Some(f32::NAN)) == "------Hz");
+    // 1 kHz for 0.25 s at 200 MHz: 250 captures in 50e6 ticks.
+    let h = fcnt::hz_of(250, 1, 50_000_000, 200_000_000).unwrap();
+    t(&format!("hz_of 1 kHz ({h})"), (h - 1000.0).abs() < 1e-3);
+    // 10 MHz with prescaler 8 over 0.25 s +- one tick: 6 digits hold.
+    let h = fcnt::hz_of(312_500, 8, 50_000_001, 200_000_000).unwrap();
+    t(&format!("hz_of 10 MHz /8 ({h})"), f(Some(h)) == "10.0000MHz");
+    // 1.234567 Hz: one capture per gate, the time between captures.
+    let h = fcnt::hz_of(1, 1, (200e6 / 1.234567f64) as u32, 200_000_000).unwrap();
+    t(&format!("hz_of 1.234567 Hz ({h})"), f(Some(h)) == "1.23457Hz");
+    t("hz_of no capture", fcnt::hz_of(0, 1, 100, 200_000_000).is_none());
+    t("psc 500 kHz", fcnt::psc_for(5e5) == 1);
+    t("psc 1.5 MHz", fcnt::psc_for(1.5e6) == 2);
+    t("psc 3 MHz", fcnt::psc_for(3e6) == 4);
+    t("psc 40 MHz", fcnt::psc_for(4e7) == 8);
 }

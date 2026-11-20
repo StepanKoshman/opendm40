@@ -139,6 +139,12 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* The frequency counter (MF > Trigger > Counter): its driver and
+         * Scope::fcnt_poll; App::scope_poll calls it only while no AD2 stream
+         * runs. */
+        *(.text.*8opendm404fcnt*);
+        *(.text.*8opendm405scope5Scope9fcnt_poll*);
+        *(.text.*8opendm408scope_ui7ctr_row*);
         /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
          * loop and asm are `.text.a2.*` (zero-wait region A2). */
         *(.text.*8opendm408memprobe*);

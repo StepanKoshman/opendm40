@@ -67,6 +67,8 @@ mod gen;
 mod gesture;
 #[path = "../../src/hwtrig.rs"]
 mod hwtrig;
+#[path = "../../src/fcnt.rs"]
+mod fcnt;
 #[path = "../../src/hy3131.rs"]
 mod hy3131;
 #[path = "../../src/hy3131_tables.rs"]

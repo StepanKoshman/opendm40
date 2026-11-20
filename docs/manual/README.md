@@ -1381,6 +1381,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
 | **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
+| **Counter** | **Off**, **On**: a 6-digit frequency counter on CH1, top right in the graph. |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1397,6 +1398,23 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 
 The edge trigger uses the trigger hardware where it can, so it does not miss
 edges between captures.
+
+**Counter On** shows CH1's frequency with 6 digits in the top right corner
+of the graph ("1.00000kHz"), a new value 4 times a second. It counts the
+trigger hardware's edges: where CH1 crosses the trigger level, on the
+trigger edge, so set the level inside the signal (a long press on the T
+marker puts it in the middle). It measures the time between the first and
+the last edge of each quarter second to 5 ns, so it has 6 digits from below
+1 Hz to the top of the input's bandwidth, unlike **Freq** in the
+measurements (one capture). No edges for 2 s: "------Hz". While the counter
+is on, the trigger hardware is the counter's: the edge trigger is searched in
+the samples (as at **Source GEN** / **DMM**), so an edge between two
+captures can be missed. Not in the Wave view. Noise around the level can
+add edges: a slow, noisy signal reads high.
+
+![The frequency counter, top right](img/scope-counter.png)
+
+*The frequency counter, top right.*
 
 **Source GEN** triggers on the generator without a wire: the meter knows
 from the generator's timers when its output crosses the trigger level, and

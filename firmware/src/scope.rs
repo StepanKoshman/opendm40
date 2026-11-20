@@ -618,6 +618,9 @@ pub struct Scope {
     /// gating TIM1. `hw_mode`: the acquisition in flight uses it (circular
     /// record over CAP); `hw_t0`: its start time (health check).
     pub hw: HwTrig,
+    /// Frequency counter on the comparator (fcnt.rs): TIM2 is its while
+    /// it runs, the trigger is the software one.
+    pub fcnt: crate::fcnt::Counter,
     hw_mode: bool,
     hw_t0: u64,
     /// Trigger level and the runt's second level in volts (wave: SI) at
@@ -1032,6 +1035,7 @@ impl Scope {
             stored_rv: 0.0,
             stored_wvd: 1.0,
             hw: HwTrig::new(),
+            fcnt: crate::fcnt::Counter::new(),
             hw_mode: false,
             hw_t0: 0,
             trig_v: f32::NAN,
@@ -1505,6 +1509,34 @@ impl Scope {
         }
     }
 
+    /// The frequency counter (MF > Trigger > Counter): start / stop it as
+    /// `fcnt.want` says, hold the comparator at the trigger level and edge,
+    /// a new reading every fcnt::GATE_MS. Region C: never while the AD2
+    /// stream runs (App::scope_poll); off in the Wave view (no comparator
+    /// input there).
+    #[inline(never)]
+    pub fn fcnt_poll(&mut self, now: u64) {
+        let want = self.fcnt.want && !self.wave;
+        if want && !self.fcnt.running {
+            if self.hw.prepared() {
+                // A comparator record in flight: the next start is software.
+                return;
+            }
+            self.hw.keep_tim2 = true;
+            self.fcnt.start(self.s.rising, now);
+        } else if !want && self.fcnt.running {
+            self.fcnt.stop();
+            self.hw.idle_tim2();
+            self.hw.resume();
+            return;
+        }
+        if self.fcnt.running {
+            self.hw.set_level(self.trig_code() as f32, self.s.rising);
+            self.fcnt.set_edge(self.s.rising);
+            self.fcnt.poll(now);
+        }
+    }
+
     /// Before a reset (App::quiesce_for_reset): the acquisition hardware off.
     pub fn stop_hw(&mut self) {
         self.halt();
@@ -1914,7 +1946,7 @@ impl Scope {
             // every record's phase, which a comparator stop does not give.
             let gen = self.gen_src() || self.gen_trace;
             let soft = self.s.ttype != 0 && !self.gen_src() && !self.ch2_src();
-            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
+            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on && !self.fcnt.want;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;

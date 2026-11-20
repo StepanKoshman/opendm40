@@ -563,6 +563,11 @@ pub fn run(out: &str) -> usize {
             p.pcond = 0;
             p.pwidth = 400e-6;
         });
+        // The frequency counter's reading, top right (Trigger > Counter).
+        add("scope-counter", &|s, p| {
+            s.m.ctr = scope_ui::Txt::new("1.00000kHz");
+            p.ctr = true;
+        });
         add("scope-trig-runt", &|s, p| {
             s.m.runt_row = Some(60);
             s.m.sel_v = 5;
