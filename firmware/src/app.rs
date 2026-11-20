@@ -2378,10 +2378,7 @@ impl App {
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4 | (swap01(crate::csvlog::change()) as u32) << 8;
-        // v11: the touch calibration (touchcal.rs; 0 = none).
-        for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
-            *w = c as u32;
-        }
+        // (p[64..70], the touch calibration's words of v11: zero, unused)
         // v12: the scope's zero calibration (scope.rs ZTRIM; 0 = none).
         for (i, t) in scope::zero_trim().iter().enumerate() {
             p[crate::persist::W_SCOPE_ZERO + i / 4] |= (*t as u8 as u32) << (8 * (i % 4));
@@ -2413,7 +2410,7 @@ impl App {
     /// math and measurements, the power meter and the Record page. Otherwise
     /// only the preferences are restored (display, sound, power, BT, alerts,
     /// units, sensor, each function button's last sub-mode and the ohm test
-    /// current, scope look and touch, the touch calibration, the
+    /// current, scope look and touch, the scope's zero calibration, the
     /// generator's setup) and the rest keeps its defaults, as the stock
     /// after a power-on. Mode Remember ON (the stock's Other Settings
     /// switch; its record: function, coupling, autorange flags, ohm variant,
@@ -2531,13 +2528,7 @@ impl App {
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
         self.gen.s = g.normalised();
-        // v11: the touch calibration, a preference (0 = none; one that
-        // fails the checks reads as none).
-        let mut tc = [0i32; 6];
-        for (c, w) in tc.iter_mut().zip(&p[crate::persist::W_TOUCH_CAL..]) {
-            *c = *w as i32;
-        }
-        app_touchtest::tc_restore(tc);
+        // (p[64..70]: the touch calibration of v11 / v12, gone: ignored)
         // v12: the scope's zero calibration, a preference (0 = none).
         let mut zt = [0i8; 10];
         for (i, t) in zt.iter_mut().enumerate() {
@@ -5169,13 +5160,6 @@ impl App {
                 true
             }
             C::DbgTouchTest(on) => self.tt_scpi(clk, on, out),
-            C::DbgTouchCal(op) => {
-                // A change redraws the touch test page (its Cal lines).
-                if op != 0 && self.view == View::TouchTest {
-                    self.redraw = true;
-                }
-                app_touchtest::tc_scpi(op, out)
-            }
             C::DbgView => {
                 // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;

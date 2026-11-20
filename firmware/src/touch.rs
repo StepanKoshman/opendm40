@@ -836,30 +836,6 @@ const DEBOUNCE_MS: u64 = 40;
 /// period while touched (stock guess 10..17 ms; DBG:TOUCH? shows it), so one
 /// stray release frame inside a touch is still absorbed by the next report.
 const RELEASE_MS: u64 = 25;
-/// The touch calibration (touchcal.rs; the touch test page's Calibrate,
-/// DBG:TOUCH:CAL): Q16 deltas from the identity `[a - 1, b, c, d, e - 1,
-/// f]`, x' = a x + b y + c, y' = d x + e y + f. All zero (the zeroed static,
-/// no calibration) is the stock's mapping: the controller's coordinates
-/// unchanged (touch_v2_6.h COORDINATES). Set only with values that passed
-/// touchcal::check (|a - 1|, |b|, |d|, |e - 1| <= 0.15), so the products
-/// in `screen` stay far inside i32 for 12-bit coordinates. In SRAM
-/// (`.sram_bss`): TCM .bss shortens the stack 1:1.
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut CAL: [i32; 6] = [0; 6];
-
-/// The calibration in use (touchcal.rs Cal).
-pub fn cal() -> [i32; 6] {
-    // SAFETY: single-threaded, no ISR touches it.
-    unsafe { *core::ptr::addr_of!(CAL) }
-}
-
-/// Use calibration `c` (touchcal.rs Cal, checked by the caller) from the
-/// next frame on.
-pub fn set_cal(c: [i32; 6]) {
-    // SAFETY: as `cal`.
-    unsafe { *core::ptr::addr_of_mut!(CAL) = c }
-}
-
 /// Frame -> state debounce, pure (no I/O; host-tested by tools/touch-test).
 ///
 /// * Moving finger: any change of the points while the screen stays touched
@@ -964,16 +940,13 @@ impl Debounce {
     }
 }
 
-/// A controller point on the 480 x 320 panel: through the calibration
-/// (`CAL`, Q16, rounded), clamped. Screen points only: `Debounce::frame`
-/// never maps a touch-key report (its X is the key's code position).
+/// A controller point on the 480 x 320 panel, clamped (the stock's mapping:
+/// the controller's coordinates unchanged, touch_v2_6.h COORDINATES; the
+/// touch calibration of earlier builds is gone, owner 2026-11-20). Screen
+/// points only: `Debounce::frame` never maps a touch-key report (its X is
+/// the key's code position).
 fn screen(p: Point) -> Point {
-    // SAFETY: as `cal`; a copy, no reference kept.
-    let k = unsafe { *core::ptr::addr_of!(CAL) };
-    let (x, y) = (p.x as i32, p.y as i32);
-    let cx = x + ((k[0] * x + k[1] * y + k[2] + 0x8000) >> 16);
-    let cy = y + ((k[3] * x + k[4] * y + k[5] + 0x8000) >> 16);
-    Point { x: cx.clamp(0, 479) as u16, y: cy.clamp(0, 319) as u16 }
+    Point { x: p.x.min(479), y: p.y.min(319) }
 }
 
 // ---------------------------------------------------------------------------
@@ -1306,7 +1279,7 @@ impl Touch {
             match &f {
                 Some(fr) => {
                     // Raw record-0 coordinates (also those of a release or
-                    // key report), before the calibration / clamping.
+                    // key report), before the clamping.
                     let pts = if fr.key { 0x80 | fr.code } else { fr.n };
                     let p = if self.ctrl == Ctrl::Hynitron { decode(&self.raw).2 } else { fr.pts[0] };
                     log(b'F', now, src, pts, self.raw[0], p);

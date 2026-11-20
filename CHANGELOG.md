@@ -5,6 +5,35 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.25-S2084 (2026-11-20)
+
+On v0.4.24-S2084. A release of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release.
+
+### Fixed
+
+- **DMM: DC V / mV with a current in the A jack** (owner). The A-jack
+  protection's probe switched the reading's converter off while a current
+  flowed in A, so the readout stopped (dimmed) and, since an alert reaches
+  the screen and the danger alarm with a reading, A-JACK / A-PROT stayed
+  silent unless the alert happened to come before the probe. The converter
+  now keeps running next to the probe: the reading goes on and the alarm
+  sounds. While the current flows the reading is about 80 ppm off (the
+  probe's converter next to it), under the red alert.
+
+### Removed
+
+- **Touch calibration** (owner, to free flash): **Calibrate** on the touch
+  test page, its walk and result screens and `DBG:TOUCH:CAL`. The touch
+  screen's points are used unchanged again, as in the stock firmware; a
+  calibration saved by an earlier build is ignored (its settings words are
+  kept, written 0). The touch test page stays.
+
+Кратко: в DC V / mV при токе через клемму A показания больше не замирают,
+а сигнализация A-JACK / A-PROT срабатывает. Калибровка сенсорного экрана
+удалена, страница проверки сенсора осталась.
+
 ## v0.4.24-S2084 (2026-11-14)
 
 On v0.4.23-S2084. A release of

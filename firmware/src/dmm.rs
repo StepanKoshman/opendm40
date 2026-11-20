@@ -4685,8 +4685,9 @@ impl Dmm {
         if self.wake_at != 0 {
             return self.wd_slow(clk, now, 0);
         }
-        // (the probe / jack check's row has AD1 off: no reading, no stall)
-        if now.saturating_sub(self.wd_poll) > 500 || self.probe {
+        // (the jack check's row has AD1 off: no reading, no stall; the
+        // A-PROT probe's keeps AD1, sentinel `probe_row`)
+        if now.saturating_sub(self.wd_poll) > 500 || (self.probe && self.jack_mode()) {
             self.wd_t = now;
         }
         self.wd_poll = now;
@@ -6242,10 +6243,11 @@ impl Dmm {
     /// APROT_GONE_MS. Without hits and without the latch the probe leaves.
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
-        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe holds AD1
-        // off, so it goes in only once the gate has a verdict of this run
-        // (DC mV's A-PROT trip needs one anyway), and that verdict stands
-        // while the probe runs.
+        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe goes in
+        // only once the gate has a verdict of this run (DC mV's A-PROT trip
+        // needs one anyway); that verdict stands while the probe runs, and
+        // the row's results (AD1 keeps converting, sentinel `probe_row`)
+        // update it.
         let mv = self.mode == 3;
         if self.probe && mv {
             self.sent.v_side_hold(now);

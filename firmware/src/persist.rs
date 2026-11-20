@@ -43,18 +43,20 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v10: 64 words; p[62..64] W_LIM_W, the power meter's W limits (lower /
 /// upper, f32 bits; their on / set bits are bit 17 of p[18] and bits 9 / 25
 /// of p[19], 0 in older records = off / unset).
-/// v11: 70 words; p[64..70] W_TOUCH_CAL, the touch calibration
-/// (touchcal.rs Cal: Q16 deltas from the identity; 0 = none, so v10 loads
-/// zero-extended as the identity).
+/// v11: 70 words; p[64..70] the touch calibration (Q16 deltas from the
+/// identity; 0 = none). Since 0.4.25 the calibration is gone (owner
+/// 2026-11-20): the words are written 0 and ignored on load (W_TOUCH_CAL,
+/// reserved), so the layout and VERSION stay.
 /// v12: 73 words; p[70..73] W_SCOPE_ZERO, the scope's zero calibration
 /// (scope::zero_trim, ten i8 half codes; 0 = none, v11 loads zero-extended).
 pub const VERSION: u32 = 12;
 pub const WORDS: usize = 73;
 const V11_WORDS: usize = 70;
-/// The scope's zero calibration (3 words; a preference, as the touch one).
+/// The scope's zero calibration (3 words; a preference).
 pub const W_SCOPE_ZERO: usize = 70;
 const V10_WORDS: usize = 64;
-/// The touch calibration (6 words, touchcal::Cal; a preference).
+/// The removed touch calibration's 6 words: reserved, written 0.
+#[allow(dead_code)]
 pub const W_TOUCH_CAL: usize = 64;
 const V9_WORDS: usize = 62;
 /// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
