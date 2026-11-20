@@ -2855,6 +2855,7 @@ impl App {
         }
     }
 
+    #[inline(never)] // .cold (link-native.x), as su::mf_hit: a tap on the MF popup
     fn sp_mf_tap(&mut self, clk: &mut Clock, tab: u8, h: su::MfHit, now: u64) {
         let mut st = self.scope.s;
         match h {

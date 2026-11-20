@@ -385,6 +385,8 @@ SECTIONS
         *(.text.*8opendm405scope*7hw_spin*);
         *(.text.*11sp_dpo_more*);
         *(.text.*8opendm408scope_ui6mf_hit*);
+        /* Its handler (App::sp_mf_tap): the same tap, after mf_hit. */
+        *(.text.*8opendm403app*3App9sp_mf_tap*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
