@@ -22,6 +22,16 @@ official opendm40 release.
   sounds. While the current flows the reading is about 80 ppm off (the
   probe's converter next to it), under the red alert.
 
+### Changed
+
+- **Scope: 8-bit digital phosphor** (owner). Persist DPO / HOT count hits
+  per cell up to 255 instead of 15, shown on a log scale (15 brightness
+  steps in DPO), and fade in time, set by the new **- / +** next to
+  **Persist:** (0.3 s, 1 s default, 3 s, 10 s, INF; kept in the settings).
+  HOT runs blue .. green .. yellow .. orange .. white, no red (owner). The
+  counts take 27 KB of the record memory while DPO / HOT is on: the record
+  is 29 K samples then (36 K before; 43 K without the phosphor, as before).
+
 ### Removed
 
 - **Touch calibration** (owner, to free flash): **Calibrate** on the touch
@@ -32,7 +42,9 @@ official opendm40 release.
 
 Кратко: в DC V / mV при токе через клемму A показания больше не замирают,
 а сигнализация A-JACK / A-PROT срабатывает. Калибровка сенсорного экрана
-удалена, страница проверки сенсора осталась.
+удалена, страница проверки сенсора осталась. DPO / HOT: 8-битный счётчик,
+логарифмическая яркость, настраиваемое затухание, в HOT вместо красного
+белый; запись в этом режиме 29 K точек.
 
 ## v0.4.24-S2084 (2026-11-14)
 

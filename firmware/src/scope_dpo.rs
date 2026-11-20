@@ -2,19 +2,22 @@
 //! trace as a hit count per graph cell (1 column x CELL frame rows), drawn
 //! by `scope_ui::Graph::flush` in a brightness (DPO) or heat (HOT) ramp.
 //!
-//! Counts are 4-bit and linear: the shown frame's hit adds one (to TOP),
-//! and every 4th frame a column's counts lose a quarter (at least one;
-//! the columns in four interleaved groups, one a frame), so a cell hit in
-//! a share p of the frames settles near 16 * p, the always-hit core at
-//! 12..15 (one colour: no flicker), and a trace that is gone fades in
-//! about 40 frames. The further triggered screens of a record (`hit` with
-//! `main` false, scope_page.rs sp_dpo_more) only light cells that are dark:
-//! a rare event shows at once, the shares stay those of the shown frames.
-//! A cell is repainted when its colour changes, not its count.
+//! Counts are 8-bit (0.4.25, owner 2026-11-20; 4-bit before): the shown
+//! frame's hit adds HIT (to 255), a further triggered screen of the record
+//! (`hit` with `main` false, scope_page.rs sp_dpo_more) lights a dark cell
+//! with HIT / 2 only, so a rare event shows at once and the shares stay
+//! those of the shown frames. The counts decay in time, not per frame:
+//! every 4th frame a group of columns (four interleaved groups, one a frame)
+//! loses c x dt / tau (at least 1), tau from Display > Decay (`DECAY_MS`;
+//! INF: none). A cell hit in a share p of the frames settles near
+//! HIT x p x frames-per-tau. The colour is a level 1..15 of the count on a
+//! log scale (`LEVEL`: 1 .. 200 in 14 equal ratios, 200 and above the top
+//! level, so the saturated core does not flicker with its decay), as a
+//! real DPO's intensity; a cell is repainted when its level changes.
 //!
-//! Memory: NCOL x NB nibbles (13 615 B) in the tail of the scope's record
+//! Memory: NCOL x NB bytes (27 230 B) in the tail of the scope's record
 //! buffer, lent only while the phosphor is shown (scope::dpo_tail: the
-//! rings are 7 K samples shorter then; roll and Persist other than DPO /
+//! rings are 14 K samples shorter then; roll and Persist other than DPO /
 //! HOT keep the whole record). `attach` takes it each render.
 
 use crate::lcd::Color;
@@ -25,9 +28,21 @@ pub const ENABLED: bool = cfg!(feature = "dpo") || cfg!(not(target_os = "none"))
 /// 1..280; the combined view uses the first ones).
 pub const CELL: i16 = 4;
 pub const NB: usize = 70;
-const BYTES: usize = if ENABLED { su::NCOL * NB / 2 } else { 0 };
-/// Counts from TOP up share the top colour (the settled core's 12..15).
-const TOP: u8 = 12;
+const BYTES: usize = if ENABLED { su::NCOL * NB } else { 0 };
+/// A shown frame's hit.
+const HIT: u8 = 16;
+/// Count -> level: the level is the number of these a count reaches
+/// (round(200^(k/14)), k = 0..14).
+const LEVEL: [u8; 15] = [1, 2, 3, 4, 5, 7, 10, 14, 21, 30, 44, 64, 93, 136, 200];
+/// Display > Decay: the counts' time constant (ms; 0 = INF, no decay) and
+/// its names; index 1 (1 s) is the default.
+pub const DECAY_MS: [u32; 5] = [300, 1000, 3000, 10_000, 0];
+pub const DECAY_NAMES: [&str; 5] = ["0.3s", "1s", "3s", "10s", "INF"];
+
+#[inline]
+fn level(c: u8) -> u8 {
+    LEVEL.iter().filter(|&&t| c >= t).count() as u8
+}
 
 pub struct Dpo {
     /// The counts (BYTES at scope::dpo_tail; null: not lent) and the claim
@@ -39,12 +54,14 @@ pub struct Dpo {
     dirty: [(u8, u8); su::NCOL],
     any: bool,
     frames: u8,
+    /// Per column group: the time (ms) it last decayed.
+    t_fade: [u32; 4],
     /// Frame height the counts were taken at (another view: start over).
     h: i16,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, frames: 0, h: 0 };
+static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, frames: 0, t_fade: [0; 4], h: 0 };
 /// The host tools' counts (no scope buffer there).
 #[cfg(not(target_os = "none"))]
 static mut HOST: [u8; BYTES] = [0; BYTES];
@@ -105,17 +122,15 @@ pub fn attach(mem: Option<(*mut u8, u32)>) {
     }
 }
 
-/// Count of cell `b` in column `i` (0: none).
+/// Colour level (0..15) of cell `b` in column `i` (0: none).
 #[inline]
 pub fn get(i: usize, b: usize) -> u8 {
     let p = cntp();
-    if !ENABLED || b >= NB || p.is_null() {
+    if !ENABLED || b >= NB || p.is_null() || i >= su::NCOL {
         return 0;
     }
-    let k = i * NB + b;
-    // SAFETY: k / 2 < BYTES (i < NCOL, b < NB).
-    let v = unsafe { *p.add(k >> 1) };
-    if k & 1 == 0 { v & 15 } else { v >> 4 }
+    // SAFETY: i * NB + b < BYTES (i < NCOL, b < NB).
+    level(unsafe { *p.add(i * NB + b) })
 }
 
 /// Cell of frame row `fy` (rows from 1).
@@ -136,12 +151,12 @@ pub fn clear() {
     };
     let s = d();
     for i in 0..su::NCOL {
-        let col = &mut cnt[i * NB / 2..(i + 1) * NB / 2];
+        let col = &mut cnt[i * NB..(i + 1) * NB];
         let (mut lo, mut hi) = (u8::MAX, 0u8);
         for (j, v) in col.iter_mut().enumerate() {
             if *v != 0 {
-                lo = lo.min(2 * j as u8);
-                hi = 2 * j as u8 + 1;
+                lo = lo.min(j as u8);
+                hi = j as u8;
                 *v = 0;
             }
         }
@@ -155,8 +170,8 @@ pub fn clear() {
 }
 
 /// A trace over column `i`, frame rows `a..=b` of a frame `h` high: the
-/// shown frame's (`main`) adds one to its cells, a further screen of the
-/// record only lights the dark ones.
+/// shown frame's (`main`) adds HIT to its cells, a further screen of the
+/// record only lights the dark ones (HIT / 2).
 pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
     let (a, b) = (a.max(1), b.min(h - 2));
     let Some(cnt) = cnt() else {
@@ -167,13 +182,12 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
     }
     let s = d();
     for c in cell_of(a)..=cell_of(b).min(NB - 1) {
-        let k = i * NB + c;
-        let v = &mut cnt[k >> 1];
-        let sh = (k & 1) * 4;
-        let n = (*v >> sh) & 15;
-        if n == 0 || (main && n < 15) {
-            *v += 1 << sh;
-            if n < TOP {
+        let v = &mut cnt[i * NB + c];
+        let n = *v;
+        let m = if main { n.saturating_add(HIT) } else if n == 0 { HIT / 2 } else { n };
+        if m != n {
+            *v = m;
+            if level(m) != level(n) {
                 mark(&mut s.dirty[i], c);
                 s.any = true;
             }
@@ -182,8 +196,9 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
 }
 
 /// One fresh frame: `tr` = CH1's frame rows per column (EMPTY: none),
-/// frame height `h`; then this frame's group of columns fades.
-pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16) {
+/// frame height `h`, the time `now` (ms) and the decay `tau` (ms, 0: INF);
+/// then this frame's group of columns decays by the time since it last did.
+pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     let Some(cnt) = cnt() else {
         return;
     };
@@ -196,22 +211,25 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16) {
     }
     let s = d();
     s.frames = (s.frames + 1) & 3;
-    let fade = |c: u8| c - (c >> 2).max((c != 0) as u8);
-    for i in (s.frames as usize..su::NCOL).step_by(4) {
-        for j in 0..NB / 2 {
-            let v = &mut cnt[i * NB / 2 + j];
-            if *v == 0 {
+    let g = s.frames as usize;
+    let dt = now.wrapping_sub(s.t_fade[g]);
+    s.t_fade[g] = now;
+    if tau == 0 {
+        return;
+    }
+    // c -= c x k / 256, at least 1 (k = 256 x dt / tau, at most 256).
+    let k = ((dt as u64 * 256 / tau as u64).min(256)) as u32;
+    for i in (g..su::NCOL).step_by(4) {
+        for j in 0..NB {
+            let v = &mut cnt[i * NB + j];
+            let n = *v;
+            if n == 0 {
                 continue;
             }
-            let (lo, hi) = (*v & 15, *v >> 4);
-            let (l2, h2) = (fade(lo), fade(hi));
-            *v = l2 | h2 << 4;
-            if l2.min(TOP) != lo.min(TOP) {
-                mark(&mut s.dirty[i], 2 * j);
-                s.any = true;
-            }
-            if h2.min(TOP) != hi.min(TOP) {
-                mark(&mut s.dirty[i], 2 * j + 1);
+            let m = n - ((n as u32 * k >> 8).max(1) as u8).min(n);
+            *v = m;
+            if level(m) != level(n) {
+                mark(&mut s.dirty[i], j);
                 s.any = true;
             }
         }
@@ -255,19 +273,19 @@ pub fn done() {
     }
 }
 
-/// Count -> colour: `heat` false: the trace colour over the graph fill in
-/// 12 steps (TOP and above at full colour, so the settled core does not
-/// pulse with its fade); true: the heat ramp of the interface's colours
-/// (blue .. red).
+/// Level -> colour: `heat` false: the trace colour over the graph fill in
+/// 15 steps (level 15 at full colour); true: the heat ramp (blue .. white),
+/// two levels a colour.
 pub fn colours(trace: Color, heat: bool) -> [Color; 16] {
     let mut t = [su::C_FILL; 16];
-    const HEAT: [Color; 8] = [0x001f, 0x02bf, 0x07ff, 0x07e0, 0xffe0, 0xfd20, 0xfa00, 0xf800];
-    const HI: [u8; 16] = [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 7, 7];
+    // Blue, azure, cyan, green, yellow, orange, pale yellow, white (owner
+    // 2026-11-20: less red, white on top).
+    const HEAT: [Color; 8] = [0x001f, 0x02bf, 0x07ff, 0x07e0, 0xffe0, 0xfd20, 0xfff0, 0xffff];
     for c in 1..16usize {
         t[c] = if heat {
-            HEAT[HI[c] as usize]
+            HEAT[(c - 1) / 2]
         } else {
-            let a = 56 + (c.min(TOP as usize) as u32 - 1) * (255 - 56) / (TOP as u32 - 1);
+            let a = 48 + (c as u32 - 1) * (255 - 48) / 14;
             su::blend565(trace, su::C_FILL, a as u8)
         };
     }

@@ -73,13 +73,14 @@ pub const CAP: usize = (43
     - cfg!(feature = "acdc-trace") as usize
     - cfg!(feature = "acdc-meth") as usize)
     * 1024;
-/// The digital phosphor's counts (scope_dpo.rs, 13 615 B) live in the last
-/// DPO_K samples of BUF, but only while the phosphor is shown (`dpo_eff`):
-/// the rings are then that much shorter (36 K raw, 55 688 packed). Roll,
+/// The digital phosphor's counts (scope_dpo.rs, 27 230 B, 8-bit since
+/// 0.4.25) live in the last DPO_K samples of BUF, but only while the
+/// phosphor is shown (`dpo_eff`): the rings are then that much shorter
+/// (29 K raw, 44 220 packed). Roll,
 /// the wave view, the decoder's log and Persist other than DPO / HOT have
 /// the whole record (owner 2026-11-12). The claim changes in `start` only,
 /// where the record before is given up anyway.
-pub const DPO_K: usize = 7 * 1024 * cfg!(feature = "dpo") as usize;
+pub const DPO_K: usize = 14 * 1024 * cfg!(feature = "dpo") as usize;
 /// The tail is the phosphor's now / wanted by the page (Persist DPO / HOT).
 static DPO_MEM: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 static DPO_WANT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

@@ -3288,6 +3288,8 @@ pub struct PopVals {
     pub roll: bool,
     /// Display > Hi-res.
     pub hires: bool,
+    /// Display > Decay (scope_dpo::DECAY_MS index; shown with DPO / HOT).
+    pub decay: u8,
     /// 0 OFF 1 MIN 2 1S 3 INF.
     pub persist: u8,
     pub bright: u8,
@@ -3550,7 +3552,7 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
         }
         1 => {
             fill_c(rect(14, 61, 399, 100), pc, C_POP_BG);
-            for (r, t) in [(rect(24, 61, 189, 20), "Roll:"), (rect(24, 105, 189, 20), "Persist:"), (rect(214, 61, 189, 20), "Brightness:"), (rect(214, 105, 189, 20), "Grid intensity:")] {
+            for (r, t) in [(rect(24, 61, 189, 20), "Roll:"), (rect(24, 105, 72, 20), "Persist:"), (rect(214, 61, 189, 20), "Brightness:"), (rect(214, 105, 189, 20), "Grid intensity:")] {
                 fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
             }
             option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
@@ -3560,6 +3562,15 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             // opendm40: DPO / HOT, the digital phosphor (scope_dpo.rs).
             if crate::scope_dpo::ENABLED {
                 option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF", "DPO", "HOT"], 29, v.persist as usize);
+                // The phosphor's decay (scope_dpo::DECAY_MS), right of the
+                // Persist label while DPO / HOT is on.
+                fill_c(rect(96, 105, 112, 20), pc, C_POP_BG);
+                if v.persist >= 4 {
+                    rbox_text(DK_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
+                    rbox_text(DK_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
+                    let n = crate::scope_dpo::DECAY_NAMES[(v.decay as usize).min(crate::scope_dpo::DECAY_NAMES.len() - 1)];
+                    fill_text(DK_VALUE, pc, C_POP_BG, sf::SC_F16, DK_VALUE, n, C_FILL, 8, 0);
+                }
             } else {
                 option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
             }
@@ -3652,6 +3663,10 @@ pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
 pub const TS_LIST: Rect = rect(24, 208, 180, 24);
 pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
+/// Display > Decay - / value / + (DPO / HOT), right of "Persist:".
+pub const DK_MINUS: Rect = rect(98, 106, 30, 18);
+pub const DK_VALUE: Rect = rect(130, 106, 40, 18);
+pub const DK_PLUS: Rect = rect(172, 106, 30, 18);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
 pub const C2_LIST: Rect = rect(24, 233, 88, 24);
@@ -3704,6 +3719,8 @@ pub enum MfHit {
     Default,
     Roll(bool),
     HiRes(bool),
+    /// Display > Decay - / + (DPO / HOT).
+    Decay(bool),
     Persist(u8),
     Bright,
     Grid,
@@ -3778,6 +3795,10 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Roll(i == 0)
             } else if let Some(i) = option_hit(rect(116, 81, 88, 24), 2, 44, x, y) {
                 MfHit::HiRes(i == 0)
+            } else if crate::scope_dpo::ENABLED && v.persist >= 4 && rect(DK_MINUS.x - 2, DK_MINUS.y - 2, DK_MINUS.w + 3, DK_MINUS.h + 3).has(x, y) {
+                MfHit::Decay(false)
+            } else if crate::scope_dpo::ENABLED && v.persist >= 4 && rect(DK_PLUS.x - 1, DK_PLUS.y - 2, DK_PLUS.w + 2, DK_PLUS.h + 3).has(x, y) {
+                MfHit::Decay(true)
             } else if let Some(i) = if crate::scope_dpo::ENABLED { option_hit(rect(24, 125, 176, 24), 6, 29, x, y) } else { option_hit(rect(24, 125, 176, 24), 4, 44, x, y) } {
                 MfHit::Persist(i)
             } else if rect(204, 75, 210, 36).has(x, y) {

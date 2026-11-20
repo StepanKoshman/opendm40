@@ -1584,13 +1584,17 @@ up to 5 items; the normal bar shows the first 4.
 
 **Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
 1 column x 4 rows: bright where the trace runs in most frames, dim where it
-went once in a while (jitter, noise, a rare runt). **DPO** uses CH1's colour
-in 12 brightness steps, **HOT** blue (rare) to red (always). A trace that is
-gone fades in about 40 frames (about a second). On the fast timebases every
+went once in a while (jitter, noise, a rare runt). The brightness follows
+the count on a log scale, so a single hit shows next to a trace hit in every
+frame. **DPO** uses CH1's colour in 15 brightness steps, **HOT** blue
+(rare) through green, yellow and orange to white (always). The **- / +**
+next to **Persist:** (shown with DPO / HOT) sets how fast a trace that is
+gone fades: **0.3s**, **1s** (default), **3s**, **10s** or **INF** (never).
+On the fast timebases every
 triggered screen of a record is added, not only the shown one, so a rare
 event appears at once. A drag, a pinch, a settings change, roll and STOP
 show the plain trace and start the count over. While DPO / HOT is on the
-scope record is 7 K samples shorter (36 K; 55 688 on the slow timebases):
+scope record is 14 K samples shorter (29 K; 44 220 on the slow timebases):
 the counts use the end of its memory. Roll and the other Persist settings
 have the whole record.
 

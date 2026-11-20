@@ -85,9 +85,10 @@ pub fn run(ck: &mut Checker, out: &str) {
             scope_dpo::discard();
             fresh();
             let mut r = Rng(0x1234_5677 + kind as u32 * 77 + mode as u32);
-            for _ in 0..600 {
+            for f in 0..600u32 {
                 let tr = frame_rows(kind, &mut r, h);
-                scope_dpo::frame(&tr, h);
+                // 25 frames/s, the 1 s decay (Display > Decay default).
+                scope_dpo::frame(&tr, h, f * 40, 1000);
                 let g = scope_ui::graph();
                 g.tr = [scope_ui::EMPTY; scope_ui::NCOL];
                 g.dpo = mode;

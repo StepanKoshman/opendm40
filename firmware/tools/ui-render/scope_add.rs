@@ -755,6 +755,31 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             pa.ch2_func = 1;
             draw(&m, scope_ui::Popup::Mf(1), &pa, true);
             save(out, "s08-ch2-func-a");
+            // Persist DPO: Decay - / value / + right of the label (opendm40
+            // 0.4.25); its taps, and Persist's own list keeps its hits.
+            for (dk, name) in [(1u8, "s08-dpo-decay"), (4, "s08-dpo-decay-inf"), (0, "s08-dpo-decay-short")] {
+                let mut pd = pv;
+                pd.persist = 4;
+                pd.decay = dk;
+                draw(&m, scope_ui::Popup::Mf(1), &pd, true);
+                save(out, name);
+                let hit = |r: stockfont::Rect| scope_ui::mf_hit(1, &pd, r.x + r.w / 2, r.y + r.h / 2);
+                if !(matches!(hit(scope_ui::DK_MINUS), scope_ui::MfHit::Decay(false)) && matches!(hit(scope_ui::DK_PLUS), scope_ui::MfHit::Decay(true))) {
+                    ck.fail("gen/dpo-decay", "Decay - / + not hit".to_string());
+                }
+                if !matches!(scope_ui::mf_hit(1, &pd, 24 + 29 * 4 + 14, 137), scope_ui::MfHit::Persist(4)) {
+                    ck.fail("gen/dpo-decay", "Persist DPO lost its hit".to_string());
+                }
+                if !matches!(scope_ui::mf_hit(1, &pd, 160, 93), scope_ui::MfHit::HiRes(_)) {
+                    ck.fail("gen/dpo-decay", "Hi-res lost its hit".to_string());
+                }
+            }
+            // Not DPO / HOT: no Decay buttons.
+            let mut po = pv;
+            po.persist = 1;
+            if matches!(scope_ui::mf_hit(1, &po, scope_ui::DK_PLUS.x + 15, scope_ui::DK_PLUS.y + 9), scope_ui::MfHit::Decay(_)) {
+                ck.fail("gen/dpo-decay", "Decay hit without DPO".to_string());
+            }
         }
         // CH2 measurements: Source CH2 in the Measure tab, two CH2 items
         // picked (magenta), and their cells under the graph.

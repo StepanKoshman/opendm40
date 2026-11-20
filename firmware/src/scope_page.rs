@@ -338,6 +338,8 @@ pub(super) struct Sp {
     /// MF > Display > Hi-res: a column shows the mean of its samples, not
     /// their min .. max (owner 2026-11-12).
     pub hires: bool,
+    /// MF > Display > Decay (Persist DPO / HOT): scope_dpo::DECAY_MS index.
+    pub decay: u8,
     pub sel_v: u8,
     pub sel_h: u8,
     /// Group of the last selection (false = level / V, true = time / H).
@@ -434,6 +436,7 @@ impl Sp {
             ch1_off: false,
             ch1_cur: false,
             hires: false,
+            decay: 1,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -799,7 +802,7 @@ impl App {
 
     /// The digital phosphor: up to DPO_MORE further triggered screens of
     /// the record `f` was cut from (scope::dpo_next) light their cells
-    /// (scope_dpo::hit, not `main`): a 36 K record holds tens of screens on
+    /// (scope_dpo::hit, not `main`): a 29 K record holds tens of screens on
     /// the fast timebases and showed one. Graph column j: the samples
     /// j * n / GW .. as the shown frame's columns; consecutive bars touch.
     #[inline(never)] // .cold (link-native.x): the work is min_max / hit
@@ -1063,7 +1066,8 @@ impl App {
         let dm = if crate::scope_dpo::ENABLED && self.sp.persist >= 4 && ident && !self.scope.rolling() && s.run && self.scope.dpo_mem() { self.sp.persist - 3 } else { 0 };
         if dm != 0 {
             if fresh {
-                crate::scope_dpo::frame(&g.tr, h as i16);
+                let tau = crate::scope_dpo::DECAY_MS[(self.sp.decay as usize).min(crate::scope_dpo::DECAY_MS.len() - 1)];
+                crate::scope_dpo::frame(&g.tr, h as i16, self.now as u32, tau);
             }
             g.tr = [su::EMPTY; su::NCOL];
         } else if g.dpo != 0 {
@@ -2550,6 +2554,7 @@ impl App {
             roll: self.roll,
             persist: self.sp.persist,
             hires: self.sp.hires,
+            decay: self.sp.decay,
             bright: self.sp.bright,
             grid: self.sp.grid,
             rising: s.rising,
@@ -2920,6 +2925,11 @@ impl App {
             }
             su::MfHit::HiRes(on) => {
                 self.sp.hires = on;
+                self.sp_settings_changed();
+            }
+            su::MfHit::Decay(up) => {
+                let n = crate::scope_dpo::DECAY_MS.len() as u8;
+                self.sp.decay = if up { (self.sp.decay + 1).min(n - 1) } else { self.sp.decay.saturating_sub(1) };
                 self.sp_settings_changed();
             }
             su::MfHit::Persist(i) => {
@@ -3431,6 +3441,9 @@ impl App {
         // [5] bits 20..23: the GEN colour (PALETTE index XOR its default
         // cyan, so 0 = cyan in older records).
         p[5] |= ((su::gen_colour_idx() ^ su::GEN_COLOUR_DEFAULT) as u32 & 0xF) << 20;
+        // [5] bits 24..26: Display > Decay (scope_dpo::DECAY_MS index XOR
+        // its default 1 s, so 0 = 1 s in older records).
+        p[5] |= ((self.sp.decay ^ 1) as u32 & 7) << 24;
     }
 
     pub(super) fn sp_restore_ext(&mut self, p: &[u32]) {
@@ -3461,6 +3474,7 @@ impl App {
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
         self.sp.hires = p[0] >> 21 & 1 != 0;
+        self.sp.decay = ((p[5] >> 24 & 7) as u8 ^ 1).min(crate::scope_dpo::DECAY_MS.len() as u8 - 1);
         if p[3] >> 15 & 1 != 0 && crate::scope_dpo::ENABLED {
             self.sp.persist = 4 + (self.sp.persist & 1);
         }
