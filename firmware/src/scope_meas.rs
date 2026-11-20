@@ -156,8 +156,11 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
     let (vmax, vmin) = (volts(hi as f32), volts(lo as f32));
     r.v[12] = vmax;
     r.v[13] = vmin;
-    r.v[19] = ((v_0 as f64 * n as f64 + v_k as f64 * s1 as f64) / n as f64) as f32;
-    r.v[11] = sqrt((sum_sq(n as u32, s1, s2, v_0, v_k) / n as f64) as f32);
+    // The moments over what the histogram holds (Hi-res: whole blocks only;
+    // the count must match s1 / s2, a large offset v_0 cancels in them).
+    let nh = if k >= 2 { n / k * k } else { n };
+    r.v[19] = ((v_0 as f64 * nh as f64 + v_k as f64 * s1 as f64) / nh as f64) as f32;
+    r.v[11] = sqrt((sum_sq(nh as u32, s1, s2, v_0, v_k) / nh as f64) as f32);
     let (rlo, rhi) = if k >= 2 { (rlo, rhi) } else { (lo, hi) };
     let clipped = rlo == 0 || rhi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };

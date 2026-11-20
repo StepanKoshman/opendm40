@@ -186,6 +186,10 @@ mod meas {
         assert!((hr.v[10] * 100.0 - 200.0).abs() <= 2.0, "hi-res Vpp {}", hr.v[10] * 100.0);
         assert!((hr.v[0] - raw.v[0]).abs() < 1.0, "Freq hi-res {} plain {}", hr.v[0], raw.v[0]);
         assert!((hr.v[19] - raw.v[19]).abs() < 0.01, "Vavg");
+        // Vrms with a large offset (v_0 = -5.12 V, AC around 0 V): the
+        // hi-res moments count whole blocks only (25 000 / 62 leaves 14).
+        let (ra, hb) = (compute_codes(&d, 12.5e6, -5.0, 0.01, 1), compute_codes(&d, 12.5e6, -5.0, 0.01, 62));
+        assert!((hb.v[11] - 1.0).abs() < 0.01 && hb.v[11] <= ra.v[11] + 1e-4, "Vrms hi-res {} plain {}", hb.v[11], ra.v[11]);
         // One clipped sample (1023) voids Vpp also in hi-res.
         let mut c = d.clone();
         c[100] = 1023;
