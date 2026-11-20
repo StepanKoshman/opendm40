@@ -2903,7 +2903,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope, self.sp.hires);
                 self.meas_res2 = if self.meas_ch2_wanted() { self.ch2_meas(&f) } else { crate::scope_meas::Results { v: [f32::NAN; 20] } };
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);

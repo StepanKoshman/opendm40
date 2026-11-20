@@ -1571,9 +1571,16 @@ MIN, 1S, INF, DPO, HOT; **Brightness** and **Grid** intensity; **GEN trace** on 
 
 **Hi-res** draws the mean of the samples in each screen column instead of
 the band from their smallest to their largest: less noise on the trace, the
-more samples a column has (2 or more; not in roll). A spike shorter than a
-column is averaged away, so switch it off to look for glitches. The
-measurements and the CSV are not changed by it.
+more samples a column has (2 or more; not in roll). From 50 µs/div a column
+holds about 62 samples, up to 3 bits more resolution when the signal
+carries some noise; 20 µs/div 25, 10 µs/div 12, 1 µs/div and faster almost
+none. The mean keeps its fraction, so a vertically stretched trace is
+smooth, not in code steps. The level measurements (Vmax, Vmin, Vpp, Vtop,
+Vbas, Vamp, Vrms) are then those of the averaged signal, without the noise;
+Freq, the widths and the duty still use every sample, and a clipped sample
+still shows `--` for Vpp. The averaging lowers the bandwidth (about
+180 kHz at 100 µs/div) and a spike shorter than a column is averaged
+away, so switch it off to look for glitches. The CSV is not changed by it.
 
 **Wide graph.** A swipe right on the right panel hides it: the graph's 10
 divisions stretch over the whole screen and the measurement bar gets a 5th

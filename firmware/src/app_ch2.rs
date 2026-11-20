@@ -296,7 +296,7 @@ impl App {
         let len = f.data.len() as f32 * step as f32;
         let Some((ia, ib)) = st.range_run(&mut st.run(), t0, len) else { return none };
         let (src, v_0, v_k) = st.meas_src(ia, ib);
-        crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k)
+        crate::scope_meas::compute_codes(&src, st.fs(), v_0, v_k, 1)
     }
 
     /// CH2 rows of a frame (model rows per engine column, 0 V on the

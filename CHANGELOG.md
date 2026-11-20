@@ -32,6 +32,13 @@ official opendm40 release.
   counts take 27 KB of the record memory while DPO / HOT is on: the record
   is 29 K samples then (36 K before; 43 K without the phosphor, as before).
 
+- **Scope: Hi-res for real** (owner). The column mean keeps its fraction
+  (a smooth trace when stretched vertically, no code steps), and the level
+  measurements (Vmax, Vmin, Vpp, Vtop, Vbas, Vamp, Vrms) come from the
+  means of the samples one screen column covers (about 62 from 50 us/div):
+  no noise in Vpp. Freq, widths and duty still use every sample; a clipped
+  sample still voids Vpp / Vamp.
+
 ### Removed
 
 - **Touch calibration** (owner, to free flash): **Calibrate** on the touch
@@ -44,7 +51,8 @@ official opendm40 release.
 а сигнализация A-JACK / A-PROT срабатывает. Калибровка сенсорного экрана
 удалена, страница проверки сенсора осталась. DPO / HOT: 8-битный счётчик,
 логарифмическая яркость, настраиваемое затухание, в HOT вместо красного
-белый; запись в этом режиме 29 K точек.
+белый; запись в этом режиме 29 K точек. Hi-res: гладкая линия с дробным
+средним, измерения уровней (Vpp и др.) по усреднённому сигналу без шума.
 
 ## v0.4.24-S2084 (2026-11-14)
 

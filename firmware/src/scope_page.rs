@@ -972,13 +972,14 @@ impl App {
                 let b = ((i + 1) * n / scope::COLS).max(a + 1).min(n);
                 // Hi-res: the mean of the column's samples (2 or more: the
                 // noise goes down with their number), else their span.
-                let (cl, ch) = if self.sp.hires && b - a >= 2 {
-                    let m = f.data.mean(a, b);
-                    (m, m)
+                let (r1, r2) = if self.sp.hires && b - a >= 2 {
+                    // (the mean's fraction kept: sub-code rows)
+                    let r = (r0 + slope * f.data.mean(a, b)) as i32;
+                    (r, r)
                 } else {
-                    f.data.min_max(a, b)
+                    let (cl, ch) = f.data.min_max(a, b);
+                    (row(cl), row(ch))
                 };
-                let (r1, r2) = (row(cl), row(ch));
                 lo = r1.min(r2);
                 hi = r1.max(r2);
             } else if n >= 2 {
@@ -3351,7 +3352,7 @@ impl App {
         st.range = r;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
-        let res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
+        let res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope, false);
         let cyc = res.v[9];
         if period > 0.0 {
             let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
