@@ -101,12 +101,16 @@ pub const DFADE: usize = 24;
 /// sent, phosphor cells whose level changed in a frame.
 pub const NPX: usize = 25;
 pub const NCELL: usize = 26;
-pub const N: usize = 27;
+/// Graph flush parts (scope_ui::prof_flush).
+pub const FLS: usize = 27;
+pub const FLC: usize = 28;
+pub const FLP: usize = 29;
+pub const N: usize = 30;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
     "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar", "dec.job",
-    "s.cols", "dpo.more", "dpo.fade", "#px", "#dcell",
+    "s.cols", "dpo.more", "dpo.fade", "#px", "#dcell", "fl.spans", "fl.cut", "fl.pix",
 ];
 
 #[derive(Clone, Copy)]

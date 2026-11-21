@@ -2015,6 +2015,17 @@ pub struct Graph {
 /// of f80524f, combined view). Host: no limit, every flush completes.
 #[cfg(target_os = "none")]
 const FLUSH_BUDGET: u32 = 300_000;
+
+/// The flush's per-column parts into the profile (fl.spans: the rows to
+/// repaint, fl.cut: holes / markers of a screen column, fl.pix: the LCD
+/// writes).
+#[cfg(target_os = "none")]
+#[inline(never)]
+fn prof_flush(q: &[u32; 3]) {
+    crate::prof::add(crate::prof::FLS, q[0]);
+    crate::prof::add(crate::prof::FLC, q[1]);
+    crate::prof::add(crate::prof::FLP, q[2]);
+}
 /// The combined view's slice (0.8 ms, `set_flush_short`): its frames are
 /// capped (app.rs COMBO_FRAME_MS), so the extra passes cost no frame rate,
 /// and the meter's USB / SCPI wait less behind a slice (device check
@@ -2437,6 +2448,9 @@ impl Graph {
             if (rc | R_ALL) & cm != 0 { d.grid } else { C_FILL }
         };
         self.px = 0;
+        // DBG:PROF? fl.spans / fl.cut / fl.pix (cycles, this call).
+        #[cfg(target_os = "none")]
+        let mut prof_q = [0u32; 3];
         // Trace-only: per-column bookkeeping, from the resume column, under
         // the device's time budget (`FLUSH_BUDGET`).
         let trace_only = !full && d == o && self.holes == self.d_holes;
@@ -2459,11 +2473,14 @@ impl Graph {
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
                 self.part = true;
+                prof_flush(&prof_q);
                 return;
             }
             let fx = i as i16 + 1;
             // Its screen columns (one; the wide graph: one or two).
             let (sx0, sx1) = (scol(fx), scol(fx + 1) - 1);
+            #[cfg(target_os = "none")]
+            let tq0 = cycles();
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
             // The phosphor's changed cells (taken: a full column covers them).
             let dsp = if dm != 0 { crate::scope_dpo::take(i) } else { None };
@@ -2502,11 +2519,17 @@ impl Graph {
                 self.d_gn[i] = self.gn[i];
                 self.d_c2[i] = self.c2[i];
             }
+            #[cfg(target_os = "none")]
+            {
+                prof_q[0] = prof_q[0].wrapping_add(cycles().wrapping_sub(tq0));
+            }
             if sp.n == 0 {
                 continue;
             }
             let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
             for sx in sx0..=sx1 {
+                #[cfg(target_os = "none")]
+                let tq1 = cycles();
                 // The wide graph's second px of a column: no vertical line or
                 // grid dot (only the centre row's line).
                 let shadow = sx != sx0;
@@ -2559,6 +2582,12 @@ impl Graph {
                 // `pix` inline for the rows without a marker or a horizontal
                 // line: a full graph took 108 ms through the closure.
                 let vrow = vcol.map_or(0, |_| h - 4);
+                #[cfg(target_os = "none")]
+                let tq2 = cycles();
+                #[cfg(target_os = "none")]
+                {
+                    prof_q[1] = prof_q[1].wrapping_add(tq2.wrapping_sub(tq1));
+                }
                 for &(a, b) in &cut[..nc] {
                     self.px += (b - a + 1) as u32;
                     // Never in a strip pass (a full graph there goes by rows,
@@ -2589,8 +2618,14 @@ impl Graph {
                         });
                     }
                 }
+                #[cfg(target_os = "none")]
+                {
+                    prof_q[2] = prof_q[2].wrapping_add(cycles().wrapping_sub(tq2));
+                }
             }
         }
+        #[cfg(target_os = "none")]
+        prof_flush(&prof_q);
         // The changed line rows (`hrows`), left to right in runs between
         // the holes over that row; per row, only the holes and markers
         // that reach it are checked per pixel.
