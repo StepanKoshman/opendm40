@@ -2409,7 +2409,7 @@ impl Graph {
             if dm == 0 {
                 return None;
             }
-            let k = crate::scope_dpo::get((fx - 1) as usize, crate::scope_dpo::cell_of(fy));
+            let k = crate::scope_dpo::get_px((fx - 1) as usize, fy);
             if k == 0 { None } else { Some(dcol[k as usize]) }
         };
         let h = d.fh;

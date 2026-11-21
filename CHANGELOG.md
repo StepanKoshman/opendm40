@@ -41,10 +41,11 @@ official opendm40 release.
   time only for the first conversion after entering Ω (was 2.5 s), then by
   as many ranges as the reading says. AC+DC, AC mV / A and the up steps of
   current are unchanged.
-- **Scope: finer DPO / HOT and faster drawing** (owner). The phosphor's
-  cells are 2 rows high instead of 4, so a slope no longer shows 4-row
-  steps; it keeps a level per cell instead of a count, in the same memory,
-  so the record is as long as before. Faster drawing (device profile,
+- **Scope: DPO / HOT without steps, and faster drawing** (owner). A pixel
+  row's brightness is blended between the two nearest 4-row cells, so a
+  slope no longer shows 4-row steps (the record is as long as before); the
+  decay goes by cells scattered over the graph, not every 4th column (no
+  vertical stripes). Faster drawing (device profile,
   HOT at 200 µs/div): 24.7 -> 43 frames/s. The columns' min / max (and
   Hi-res mean) and the measurements read the record four samples at a
   time (columns 5.1 -> 2.0 ms, measurements 16 -> 9 ms); the graph skips
@@ -65,7 +66,7 @@ official opendm40 release.
 (страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
 (поле под предпросмотром). Автовыбор диапазона быстрее: DC V / mV, DC A, AC V и Ω
 переходят сразу на нужный диапазон, а не по одному. DPO и HOT в осциллографе без ступенек
-(ячейки 2 пикселя вместо 4), и кадр строится быстрее.
+(яркость смешивается между соседними ячейками) и без вертикальных полос, и кадр строится быстрее.
 
 ## v0.4.25-S2084 (2026-11-20)
 

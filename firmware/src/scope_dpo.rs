@@ -2,31 +2,31 @@
 //! trace as a hit count per graph cell (1 column x CELL frame rows), drawn
 //! by `scope_ui::Graph::flush` in a brightness (DPO) or heat (HOT) ramp.
 //!
-//! The model is a count c (0..255) per cell: the shown frame's hit adds HIT
-//! (to 255), a further triggered screen of the record (`hit` with `main`
-//! false, scope_page.rs sp_dpo_more) lights a dark cell with HIT / 2 only,
-//! so a rare event shows at once and the shares stay those of the shown
-//! frames. The counts decay in time, not per frame: every 4th frame a group
-//! of cells (four groups scattered by a hash, one a frame) loses c x dt /
-//! tau (at least 1), tau from Display > Decay (`DECAY_MS`; INF: none). A cell hit
-//! in a share p of the frames settles near HIT x p x frames-per-tau. The
-//! colour is a level 1..15 of the count on a log scale (`LEVEL`: 1 .. 200
-//! in 14 equal ratios, 200 and above the top level), as a real DPO's
-//! intensity; a cell is repainted when its level changes.
+//! Counts are 8-bit (0.4.25, owner 2026-11-20): the shown frame's hit adds
+//! HIT (to 255), a further triggered screen of the record (`hit` with
+//! `main` false, scope_page.rs sp_dpo_more) lights a dark cell with HIT / 2
+//! only, so a rare event shows at once and the shares stay those of the
+//! shown frames. The counts decay in time, not per frame: every 4th frame
+//! a group of cells (four groups scattered by a hash, `group`, one a frame)
+//! loses c x dt / tau (at least 1), tau from Display > Decay (`DECAY_MS`;
+//! INF: none). A cell hit in a share p of the frames settles near HIT x p x
+//! frames-per-tau. The colour is a level 1..15 of the count on a log scale
+//! (`LEVEL`: 1 .. 200 in 14 equal ratios, 200 and above the top level, so
+//! the saturated core does not flicker with its decay), as a real DPO's
+//! intensity.
 //!
-//! Cells are 2 frame rows high (owner 2026-11-21, "убрать ступеньки": 4
-//! before, a slope was drawn in 4-row steps) in the same memory: a cell
-//! keeps its level (4 bits, two cells a byte), not its count. A step takes
-//! the count as a point of the level's range (`count_in`: random in it,
-//! 255 at the top level, so the saturated core stays there under its
-//! decay), applies the count rule above and keeps the new count's level:
-//! on average the counts' behaviour, and the painter reads a level without
-//! a conversion.
+//! Pixels between cells (owner 2026-11-21, "убрать ступеньки", option 2):
+//! a pixel row's count is interpolated between the two nearest cells'
+//! centres (`get_px`), so a slope shows no 4-row steps. (2-row cells with a
+//! 4-bit level each were tried first: the levels' random rounding showed as
+//! a ripple in the trace.) A cell whose level changed repaints its rows and
+//! half a cell beyond them (`take`).
 //!
-//! Memory: NCOL x NB / 2 bytes (27 230 B) in the tail of the scope's record
-//! buffer, lent only while the phosphor is shown (scope::dpo_tail: the
-//! rings are 14 K samples shorter then; roll and Persist other than DPO /
-//! HOT keep the whole record). `attach` takes it each render.
+//! Memory: NCOL x NB bytes (27 230 B) and the count -> level table (`LVL`,
+//! 256 B, built at each claim) in the tail of the scope's record buffer,
+//! lent only while the phosphor is shown (scope::dpo_tail: the rings are
+//! 14 K samples shorter then; roll and Persist other than DPO / HOT keep the
+//! whole record). `attach` takes it each render.
 
 use crate::lcd::Color;
 use crate::scope_ui as su;
@@ -34,9 +34,9 @@ use crate::scope_ui as su;
 pub const ENABLED: bool = cfg!(feature = "dpo") || cfg!(not(target_os = "none"));
 /// Frame rows per cell and cells per column (the full page frame's rows
 /// 1..280; the combined view uses the first ones).
-pub const CELL: i16 = 2;
-pub const NB: usize = 140;
-const BYTES: usize = if ENABLED { su::NCOL * NB / 2 } else { 0 };
+pub const CELL: i16 = 4;
+pub const NB: usize = 70;
+const BYTES: usize = if ENABLED { su::NCOL * NB } else { 0 };
 /// Count -> level table after the levels (256 B of the loan's slack,
 /// built at each claim): one load instead of up to 15 compares a cell.
 const LVL: usize = BYTES;
@@ -73,43 +73,12 @@ fn level(c: u8) -> u8 {
     level_of(c)
 }
 
-/// A count for level `l` (`Dpo::rng` the random part): 0 for none, 255 for
-/// the top, else uniform in LEVEL[l - 1] .. LEVEL[l].
-#[inline(never)]
-fn count_in(l: u8, rng: &mut u32) -> u8 {
-    match l {
-        0 => 0,
-        _ => {
-            let (a, b) = if l >= 15 { (LEVEL[14], 255) } else { (LEVEL[l as usize - 1], LEVEL[l as usize]) };
-            let mut x = *rng;
-            x ^= x << 13;
-            x ^= x >> 17;
-            x ^= x << 5;
-            *rng = x;
-            // (a multiply, not a division by the range)
-            a + (((x >> 16) * (b - a) as u32) >> 16) as u8
-        }
-    }
-}
-
 /// The decay group (0..3) of cell `j` in column `i`: a hash, so a frame's
 /// decay is spread over the graph with no column or row pattern.
 #[inline(always)]
 fn group(i: usize, j: usize) -> usize {
     let h = (i as u32).wrapping_mul(0x9E37_79B1) ^ (j as u32).wrapping_mul(0x85EB_CA77);
     (h >> 30) as usize
-}
-
-/// Level of cell `b` in column `i` (two cells a byte: even ones low).
-#[inline]
-fn lv(cnt: &[u8], i: usize, b: usize) -> u8 {
-    cnt[i * (NB / 2) + b / 2] >> ((b & 1) * 4) & 15
-}
-
-#[inline]
-fn set_lv(cnt: &mut [u8], i: usize, b: usize, l: u8) {
-    let (v, sh) = (&mut cnt[i * (NB / 2) + b / 2], (b & 1) * 4);
-    *v = (*v & !(15 << sh)) | (l & 15) << sh;
 }
 
 pub struct Dpo {
@@ -126,12 +95,10 @@ pub struct Dpo {
     t_fade: [u32; 4],
     /// Frame height the counts were taken at (another view: start over).
     h: i16,
-    /// `count_in`'s xorshift state (never 0).
-    rng: u32,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, frames: 0, t_fade: [0; 4], h: 0, rng: 0x2545_F491 };
+static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, frames: 0, t_fade: [0; 4], h: 0 };
 /// The host tools' counts (no scope buffer there).
 #[cfg(not(target_os = "none"))]
 static mut HOST: [u8; TOTAL] = [0; TOTAL];
@@ -202,15 +169,27 @@ pub fn attach(mem: Option<(*mut u8, u32)>) {
     }
 }
 
-/// Colour level (0..15) of cell `b` in column `i` (0: none).
+/// Colour level (0..15) of frame row `fy` in column `i` (0: none): the
+/// count between the two nearest cells' centres (row 2.5 + CELL c),
+/// interpolated linearly, then its level (`LEVEL`), so a saturated core
+/// keeps the top level and a slope fades over 4 rows instead of a step.
 #[inline]
-pub fn get(i: usize, b: usize) -> u8 {
+pub fn get_px(i: usize, fy: i16) -> u8 {
     let p = cntp();
-    if !ENABLED || b >= NB || p.is_null() || i >= su::NCOL {
+    if !ENABLED || p.is_null() || i >= su::NCOL {
         return 0;
     }
-    // SAFETY: i * NB / 2 + b / 2 < BYTES (i < NCOL, b < NB).
-    unsafe { *p.add(i * (NB / 2) + b / 2) >> ((b & 1) * 4) & 15 }
+    // In half rows from the first centre: cells are 8 apart, a row's
+    // position is odd (weights 1, 3, 5, 7 of 8).
+    let pos = 2 * fy as i32 - 5;
+    let c0 = pos.div_euclid(8);
+    let w = pos.rem_euclid(8) as u32;
+    let at = |c: i32| -> u32 {
+        let c = c.clamp(0, NB as i32 - 1) as usize;
+        // SAFETY: i * NB + c < BYTES (i < NCOL, c < NB).
+        unsafe { *p.add(i * NB + c) as u32 }
+    };
+    level(((at(c0) * (8 - w) + at(c0 + 1) * w + 4) / 8) as u8)
 }
 
 /// Cell of frame row `fy` (rows from 1).
@@ -231,12 +210,12 @@ pub fn clear() {
     };
     let s = d();
     for i in 0..su::NCOL {
-        let col = &mut cnt[i * (NB / 2)..(i + 1) * (NB / 2)];
+        let col = &mut cnt[i * NB..(i + 1) * NB];
         let (mut lo, mut hi) = (u8::MAX, 0u8);
         for (j, v) in col.iter_mut().enumerate() {
             if *v != 0 {
-                lo = lo.min(2 * j as u8);
-                hi = 2 * j as u8 + 1;
+                lo = lo.min(j as u8);
+                hi = j as u8;
                 *v = 0;
             }
         }
@@ -262,16 +241,13 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
     }
     let s = d();
     for c in cell_of(a)..=cell_of(b).min(NB - 1) {
-        let l = lv(cnt, i, c);
-        let m = if main {
-            level(count_in(l, &mut s.rng).saturating_add(HIT))
-        } else if l == 0 {
-            level(HIT / 2)
-        } else {
-            l
-        };
-        if m != l {
-            set_lv(cnt, i, c, m);
+        let v = &mut cnt[i * NB + c];
+        let n = *v;
+        let m = if main { n.saturating_add(HIT) } else if n == 0 { HIT / 2 } else { n };
+        if m != n {
+            *v = m;
+            // (a count change moves the interpolated rows around the cell:
+            // repainted, not only on a level change)
             mark(&mut s.dirty[i], c);
             s.any = true;
         }
@@ -310,27 +286,16 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     // 2026-11-21: the column groups' 4-frame decay cycle showed as slowly
     // drifting vertical bands across the whole trace in DPO and HOT).
     for i in 0..su::NCOL {
-        for jb in 0..NB / 2 {
-            // (both cells of the byte dark: the common case, one test)
-            if cnt[i * (NB / 2) + jb] == 0 {
+        for j in 0..NB {
+            let v = &mut cnt[i * NB + j];
+            let n = *v;
+            if n == 0 || group(i, j) != g {
                 continue;
             }
-            for j in [2 * jb, 2 * jb + 1] {
-                if group(i, j) != g {
-                    continue;
-                }
-                let l = lv(cnt, i, j);
-                if l == 0 {
-                    continue;
-                }
-                let n = count_in(l, &mut s.rng);
-                let m = level(n - ((n as u32 * k >> 8).max(1) as u8).min(n));
-                if m != l {
-                    set_lv(cnt, i, j, m);
-                    mark(&mut s.dirty[i], j);
-                    s.any = true;
-                }
-            }
+            *v = n - ((n as u32 * k >> 8).max(1) as u8).min(n);
+            // Any count change moves the rows blended with it (`get_px`).
+            mark(&mut s.dirty[i], j);
+            s.any = true;
         }
     }
     #[cfg(all(target_os = "none", feature = "dbg-prof"))]
@@ -353,7 +318,8 @@ pub fn take(i: usize) -> Option<(i16, i16)> {
     if dt.1 == 0 {
         return None;
     }
-    let r = (1 + dt.0 as i16 * CELL, dt.1 as i16 * CELL);
+    // The cells' rows and half a cell beyond (`get_px` blends them in).
+    let r = (1 + dt.0 as i16 * CELL - CELL / 2, dt.1 as i16 * CELL + CELL / 2);
     *dt = (0, 0);
     Some(r)
 }
