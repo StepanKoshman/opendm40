@@ -105,23 +105,20 @@ pub const NCELL: usize = 26;
 pub const FLS: usize = 27;
 pub const FLC: usize = 28;
 pub const FLP: usize = 29;
-/// sp_update: the model, scope_ui::update (badges, panel, graph flush).
-pub const MODEL: usize = 30;
-pub const UPD: usize = 31;
 /// Graph flush: before / over / after its column loop.
-pub const FLPRE: usize = 32;
-pub const FLLOOP: usize = 33;
-pub const FLPOST: usize = 34;
+pub const FLPRE: usize = 30;
+pub const FLLOOP: usize = 31;
+pub const FLPOST: usize = 32;
 /// Measurements: histogram pass, edge pass (+ the levels), duty pass.
-pub const MHIST: usize = 35;
-pub const MEDGE: usize = 36;
-pub const MDUTY: usize = 37;
-pub const N: usize = 38;
+pub const MHIST: usize = 33;
+pub const MEDGE: usize = 34;
+pub const MDUTY: usize = 35;
+pub const N: usize = 36;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
     "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar", "dec.job",
-    "s.cols", "dpo.more", "dpo.fade", "#px", "#dcell", "fl.spans", "fl.cut", "fl.pix", "s.model", "s.update", "fl.pre", "fl.loop", "fl.post", "m.hist", "m.edge", "m.duty",
+    "s.cols", "dpo.more", "dpo.fade", "#px", "#dcell", "fl.spans", "fl.cut", "fl.pix", "fl.pre", "fl.loop", "fl.post", "m.hist", "m.edge", "m.duty",
 ];
 
 #[derive(Clone, Copy)]

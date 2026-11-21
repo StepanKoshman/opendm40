@@ -863,12 +863,8 @@ impl App {
             self.redraw = true;
             return;
         }
-        crate::prof::enter(crate::prof::MODEL);
         let m = self.sp_model(now);
-        crate::prof::exit(crate::prof::MODEL);
-        crate::prof::enter(crate::prof::UPD);
         su::update(&m);
-        crate::prof::exit(crate::prof::UPD);
         if self.sp.bubble && self.sp.bubble_dirty {
             self.sp.bubble_dirty = false;
             self.sp_bubble_draw();
