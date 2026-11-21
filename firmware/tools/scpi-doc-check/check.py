@@ -79,7 +79,7 @@ DEF_DOC = os.path.join(REPO, 'docs', 'manual', 'scpi-reference.md')
 
 # Leading identifiers of expressions that hold a header part (Scpi::handle,
 # parse_func, range_cmd, coup_cmd, is_pow, parse_pow, wav_cmd).
-HEADER_VARS = {'p0', 'p1', 'sub', 'p', 'l', 'l0', 'l1', 'leaf', 'parts', 's2', 'op', 'm', 'r', 'rest', 'head'}
+HEADER_VARS = {'p0', 'p1', 'sub', 'p', 'l', 'l0', 'l1', 'leaf', 'parts', 's2', 'op', 'm', 'r', 'rest', 'head', 'p2'}
 # Leading identifiers of argument expressions.
 ARG_VARS = {'a', 'a0', 'a1', 'v', 't', 'x', 'arg', 'ra', 'rs', 'tok', 'first', 'third', 'trim', 'name', 'unit'}
 

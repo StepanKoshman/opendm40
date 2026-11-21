@@ -671,10 +671,12 @@ UART (Modbus RTU frames recognised in it) and DALI on the scope page ([the decod
 | `SOURce:VOLTage:OFFSet[?]` | centre level, V, or `AUTO` | `+1.500000E+00` | both |
 | `SOURce:FUNCtion:SQUare:DCYCle[?]` | duty cycle, % (0 .. 100) | the duty produced: `+5.000000E+01` | both |
 | `OUTPut[?]` | `ON` or `OFF` | `1` or `0` | both |
-| `SOURce:AM:STATe[?]`, `SOURce:FM:STATe[?]` | `ON` or `OFF` (AM and FM exclude each other: `ON` switches the other off) | `1` or `0` | both |
+| `SOURce:AM:STATe[?]` | `ON` or `OFF` (`ON` switches FM off) | `1` or `0` | both |
+| `SOURce:FM:STATe[?]` | `ON` or `OFF` (`ON` switches AM off) | `1` or `0` | both |
 | `SOURce:AM:DEPTh[?]` | AM depth, % (0 .. 100) | `+5.000000E+01` | both |
 | `SOURce:FM:DEViation[?]` | FM peak deviation, Hz | the deviation used (limited around the carrier while FM runs) | both |
-| `SOURce:AM:INTernal:FREQuency[?]`, `SOURce:FM:INTernal:FREQuency[?]` | modulation frequency, Hz (one for both) | the modulation frequency produced (carrier / a whole number) | both |
+| `SOURce:AM:INTernal:FREQuency[?]` | modulation frequency, Hz (one for AM and FM) | the modulation frequency produced (carrier / a whole number) | both |
+| `SOURce:FM:INTernal:FREQuency[?]` | the same modulation frequency | as `SOURce:AM:INTernal:FREQuency?` | both |
 
 - A frequency of 0 or below, a negative amplitude or a duty outside 0 .. 100
   is `Data out of range`; the setting stays as it was.
