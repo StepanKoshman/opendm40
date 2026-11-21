@@ -2346,6 +2346,8 @@ impl Graph {
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
     /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
+        #[cfg(target_os = "none")]
+        let tf0 = cycles();
         if !m.ch1_on {
             // CH1 off: no trace, no persistence (the record is still taken).
             self.tr = [EMPTY; NCOL];
@@ -2363,6 +2365,8 @@ impl Graph {
         if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
             self.part = false;
+            #[cfg(target_os = "none")]
+            crate::prof::add(crate::prof::FLPRE, cycles().wrapping_sub(tf0));
             return;
         }
         let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh || dm != self.d_dpo;
@@ -2470,6 +2474,10 @@ impl Graph {
         } else {
             None
         };
+        #[cfg(target_os = "none")]
+        let tf1 = cycles();
+        #[cfg(target_os = "none")]
+        crate::prof::add(crate::prof::FLPRE, tf1.wrapping_sub(tf0));
         for j in 0..if band.is_some() { 0 } else { NCOL } {
             let i = (start + j) % NCOL;
             #[cfg(target_os = "none")]
@@ -2477,6 +2485,7 @@ impl Graph {
                 self.next = i as u16;
                 self.part = true;
                 prof_flush(&prof_q);
+                crate::prof::add(crate::prof::FLLOOP, cycles().wrapping_sub(tf1));
                 return;
             }
             let fx = i as i16 + 1;
@@ -2644,6 +2653,10 @@ impl Graph {
         }
         #[cfg(target_os = "none")]
         prof_flush(&prof_q);
+        #[cfg(target_os = "none")]
+        let tf2 = cycles();
+        #[cfg(target_os = "none")]
+        crate::prof::add(crate::prof::FLLOOP, tf2.wrapping_sub(tf1));
         // The changed line rows (`hrows`), left to right in runs between
         // the holes over that row; per row, only the holes and markers
         // that reach it are checked per pixel.
@@ -2761,6 +2774,8 @@ impl Graph {
         }
         self.next = 0;
         self.part = false;
+        #[cfg(target_os = "none")]
+        crate::prof::add(crate::prof::FLPOST, cycles().wrapping_sub(tf2));
         crate::scope_dpo::done();
         self.d_dpo = dm;
         self.d_tr = self.tr;
