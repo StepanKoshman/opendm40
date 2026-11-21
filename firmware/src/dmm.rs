@@ -878,6 +878,7 @@ impl Ohm600 {
     /// the current through Rref is the node's leak; its conductance (as a
     /// resistor across the jacks, the simplest model; whether it is one is
     /// *unknown*) into a mean over the last ~4.
+    #[inline(never)] // .cold (link-native.x): 600 Mohm / nS only
     fn learn(&mut self, a: i32, b: i32) {
         let (vx, vf) = (a as f32 * OHM600_V, b as f32 * OHM600_V);
         let drop = vf - vx - self.off;
@@ -922,6 +923,7 @@ impl Ohm600 {
 impl Ohm600 {
     /// Decimals for `mohm` (the decade's 6000-count format, with
     /// hysteresis around 6 / 60 Mohm).
+    #[inline(never)] // .cold (link-native.x): 600 Mohm / nS only
     fn decimals(&mut self, mohm: f32) -> u8 {
         let want = if mohm < 6.0 { 3 } else if mohm < 60.0 { 2 } else { 1 };
         if !self.dec_set {
@@ -942,6 +944,7 @@ impl Ohm600 {
     /// the readings in it, kohm) is about one such digit or less (as the
     /// other ranges' extra digits: DC V 6 V shows its 10 uV at a ~7 uV mean
     /// sd); on at 0.7 digit, off above 1.3 (no flicker at the edge).
+    #[inline(never)] // .cold (link-native.x): 600 Mohm / nS only
     fn ext(&mut self, dec: u8) -> bool {
         let n = self.hn as usize;
         if n < OHM600_AVG {
@@ -6073,6 +6076,7 @@ impl Dmm {
 
     /// Ohm r7, the experimental 600 Mohm (`OHM600`): one phase step per AD1
     /// result, a reading when both phases are in (~2 s at skip 2, keep 3).
+    #[inline(never)] // .cold (link-native.x): once per AD1 result in 600 Mohm / nS only
     fn poll_ohm600(&mut self, clk: &mut Clock) -> Option<Reading> {
         if !self.manual {
             // Not in the autorange (whatever released the manual range).
