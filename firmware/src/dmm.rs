@@ -945,6 +945,11 @@ impl Ohm600 {
     /// the readings in it, kohm) is about one such digit or less (as the
     /// other ranges' extra digits: DC V 6 V shows its 10 uV at a ~7 uV mean
     /// sd); on at 0.7 digit, off above 1.3 (no flicker at the edge).
+    // Region A2 (zero-wait, the slack below the loader marker): region B
+    // was 0.2 KB short and region C 16 B short with it (owner 2026-11-21,
+    // after the scope speed-up).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.ohm600_ext")]
     fn ext(&mut self, dec: u8) -> bool {
         let n = self.hn as usize;
         if n < OHM600_AVG {
