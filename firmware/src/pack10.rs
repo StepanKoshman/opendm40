@@ -99,52 +99,10 @@ pub fn get(base: *const u8, i: usize) -> u16 {
     (unsafe { core::ptr::read_unaligned(base.add(b >> 3) as *const u32) } >> (b & 7)) as u16 & 0x3FF
 }
 
-/// Min / max / sum of the packed codes j .. j + n at `base` (no wrap) into
-/// `acc`: single codes up to a group boundary, then whole groups. No
-/// closure: at opt-level "z" one stayed a call per code (device profile
-/// 244982b: 6.5 ms for a 200 us/div frame, slower than the per-code `at`).
-#[inline(always)]
-fn scan_run(base: *const u8, mut j: usize, n: usize, acc: &mut (u16, u16, u32)) {
-    let end = j + n;
-    let (mut lo, mut hi, mut s) = *acc;
-    macro_rules! put {
-        ($v:expr) => {{
-            let v: u16 = $v;
-            if v < lo {
-                lo = v;
-            }
-            if v > hi {
-                hi = v;
-            }
-            s += v as u32;
-        }};
-    }
-    while j < end && j & 3 != 0 {
-        put!(get(base, j));
-        j += 1;
-    }
-    // SAFETY: group g's 5 bytes are in the buffer (+ 3 of slack).
-    let mut p = unsafe { base.add(j / 4 * 5) };
-    while j + 4 <= end {
-        let (w, h) = unsafe { (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32) };
-        put!((w & 0x3FF) as u16);
-        put!((w >> 10 & 0x3FF) as u16);
-        put!((w >> 20 & 0x3FF) as u16);
-        put!((w >> 30 | h << 2) as u16);
-        j += 4;
-        p = unsafe { p.add(5) };
-    }
-    while j < end {
-        put!(get(base, j));
-        j += 1;
-    }
-    *acc = (lo, hi, s);
-}
-
 /// Packed codes j .. j + out.len() at `base` (no wrap) into `out`
 /// (pointer writes: the indexed ones kept a bounds check each at
-/// opt-level "z").
-#[inline(always)]
+/// opt-level "z"). One copy (region B: inlined twice it cost the room).
+#[inline(never)]
 fn read_run(base: *const u8, mut j: usize, out: &mut [u16]) {
     let end = j + out.len();
     let mut o = out.as_mut_ptr();
@@ -366,21 +324,29 @@ impl Codes {
         self.cap != 0 && self.cap != CH2_VIEW
     }
 
-    /// Min, max and sum of codes a .. b (b <= len) of a packed view, a group
-    /// of 4 codes (5 bytes) a step (owner 2026-11-21, scope drawing speed:
-    /// the per-code `at` took 5 ms for the 25 000 codes of a 200 us/div
-    /// screen).
+    /// Min, max and sum of codes a .. b (b <= len) of a packed view, read
+    /// in chunks a group of 4 codes at a time (`read`; owner 2026-11-21,
+    /// scope drawing speed: the per-code `at` took 5 ms for the 25 000
+    /// codes of a 200 us/div screen).
     #[inline(never)]
     fn scan(&self, a: usize, b: usize) -> (u16, u16, u32) {
-        let mut acc = (u16::MAX, 0u16, 0u32);
-        let j = self.off + a;
-        let n = b.saturating_sub(a);
-        // Up to the ring's end, then from its start.
-        let first = if j >= self.cap { 0 } else { (self.cap - j).min(n) };
-        let j0 = if j >= self.cap { j - self.cap } else { j };
-        scan_run(self.base, j0, first, &mut acc);
-        scan_run(self.base, if first == 0 { j0 } else { 0 }, n - first, &mut acc);
-        acc
+        let (mut lo, mut hi, mut s) = (u16::MAX, 0u16, 0u32);
+        let mut buf = [0u16; CHUNK];
+        let mut i = a;
+        while i < b {
+            let m = self.read(i, &mut buf[..(b - i).min(CHUNK)]);
+            for &v in &buf[..m] {
+                if v < lo {
+                    lo = v;
+                }
+                if v > hi {
+                    hi = v;
+                }
+                s += v as u32;
+            }
+            i += m.max(1);
+        }
+        (lo, hi, s)
     }
 
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).

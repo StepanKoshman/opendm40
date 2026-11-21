@@ -75,7 +75,7 @@ fn level(c: u8) -> u8 {
 
 /// A count for level `l` (`Dpo::rng` the random part): 0 for none, 255 for
 /// the top, else uniform in LEVEL[l - 1] .. LEVEL[l].
-#[inline(always)]
+#[inline(never)]
 fn count_in(l: u8, rng: &mut u32) -> u8 {
     match l {
         0 => 0,
