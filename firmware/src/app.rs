@@ -2995,6 +2995,7 @@ impl App {
         self.sp_tick(now);
         self.sp.paint_due = false;
         crate::prof::exit(crate::prof::PAINT);
+        crate::prof::add(crate::prof::NPX, crate::scope_ui::graph().px.saturating_mul(200));
         // A long paint (a status change repaints the status badge and the
         // record bar, ~14 ms on the device model): the cell waits for the
         // next pass, so no pass stacks paint + cell (~10 ms) on top of the

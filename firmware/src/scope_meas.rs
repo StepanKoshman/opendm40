@@ -125,22 +125,37 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
     let volts = |c: f32| v_0 + v_k * c;
     let mut hist = [0u16; 1024];
     let (mut rlo, mut rhi) = (1023u16, 0u16);
+    // The view in chunks (Src::read: a packed one 4 codes a step).
+    let mut buf = [0u16; crate::pack10::CHUNK];
     if k >= 2 {
-        for j in 0..n / k {
-            let mut s = 0u32;
-            for i in j * k..(j + 1) * k {
-                let c = d.at(i).min(1023);
+        // Whole blocks of k only (n / k of them).
+        let (mut s, mut kn) = (0u32, 0usize);
+        let mut i = 0;
+        while i < n / k * k {
+            let m = d.read(i, &mut buf[..(n / k * k - i).min(crate::pack10::CHUNK)]);
+            for &c in &buf[..m] {
+                let c = c.min(1023);
                 rlo = rlo.min(c);
                 rhi = rhi.max(c);
                 s += c as u32;
+                kn += 1;
+                if kn == k {
+                    let c = ((s + k as u32 / 2) / k as u32) as usize;
+                    hist[c] = hist[c].saturating_add(k as u16);
+                    (s, kn) = (0, 0);
+                }
             }
-            let c = ((s + k as u32 / 2) / k as u32) as usize;
-            hist[c] = hist[c].saturating_add(k as u16);
+            i += m.max(1);
         }
     } else {
-        for i in 0..n {
-            let c = d.at(i).min(1023) as usize;
-            hist[c] = hist[c].saturating_add(1);
+        let mut i = 0;
+        while i < n {
+            let m = d.read(i, &mut buf);
+            for &c in &buf[..m] {
+                let c = c.min(1023) as usize;
+                hist[c] = hist[c].saturating_add(1);
+            }
+            i += m.max(1);
         }
     }
     let (mut lo, mut hi) = (1023u16, 0u16);
@@ -219,8 +234,15 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
         let (mut hp, mut lp) = (0u32, 0u32);
         let mut prev_hi = d.at(0) >= h50;
         let mut cross50: Option<usize> = None;
+        // (buf[t] is code i: refilled from i when used up)
+        let (mut m, mut t) = (0usize, 0usize);
         for i in 0..n {
-            let c = d.at(i);
+            if t == m {
+                m = d.read(i, &mut buf);
+                t = 0;
+            }
+            let c = buf[t];
+            t += 1;
             let now_hi = c >= h50;
             if now_hi != prev_hi {
                 cross50 = Some(i);
@@ -274,11 +296,15 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
             // Duty / widths over whole cycles.
             let mut hn = 0u32;
             let (mut c1, mut c2) = (0u64, 0u64);
-            for i in e[0]..e[1] {
-                let c = d.at(i);
-                hn += (c >= h50) as u32;
-                c1 += c as u64;
-                c2 += (c as u32 * c as u32) as u64;
+            let mut i = e[0];
+            while i < e[1] {
+                let m = d.read(i, &mut buf[..(e[1] - i).min(crate::pack10::CHUNK)]);
+                for &c in &buf[..m] {
+                    hn += (c >= h50) as u32;
+                    c1 += c as u64;
+                    c2 += (c as u32 * c as u32) as u64;
+                }
+                i += m.max(1);
             }
             let cnt = (e[1] - e[0]) as u32;
             let ln = cnt - hn;

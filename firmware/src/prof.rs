@@ -97,12 +97,16 @@ pub const COLS: usize = 22;
 pub const DMORE: usize = 23;
 /// The phosphor's hits and decay of a frame (scope_dpo::frame).
 pub const DFADE: usize = 24;
-pub const N: usize = 25;
+/// Counts, not times (`add` of n x CYC_PER_US): pixels a scope paint pass
+/// sent, phosphor cells whose level changed in a frame.
+pub const NPX: usize = 25;
+pub const NCELL: usize = 26;
+pub const N: usize = 27;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
     "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar", "dec.job",
-    "s.cols", "dpo.more", "dpo.fade",
+    "s.cols", "dpo.more", "dpo.fade", "#px", "#dcell",
 ];
 
 #[derive(Clone, Copy)]

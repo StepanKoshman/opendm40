@@ -83,6 +83,28 @@ mod meas {
         assert!((r.v[1] - 50.0).abs() < 1.0, "duty {}", r.v[1]);
     }
 
+    // The chunked reads (Src::read; a packed view 4 codes a step, across
+    // its ring's end): every measurement as the plain slice's, Hi-res too.
+    #[test]
+    fn packed_view_reads_as_the_slice() {
+        let cap = 3001;
+        let n = 2500;
+        let d: Vec<u16> = (0..n).map(|i| (512.0 + 300.0 * (i as f32 * 0.0211).sin() + ((i * 37) % 11) as f32) as u16).collect();
+        let mut buf = vec![0u16; cap + 4];
+        let p = buf.as_mut_ptr() as *mut u8;
+        let off = 1777;
+        for (i, &c) in d.iter().enumerate() {
+            crate::pack10::set(p, (off + i) % cap, c);
+        }
+        let v = crate::pack10::Codes::new(p, off, n, cap);
+        for k in [1, 6] {
+            let (a, b) = (compute_codes(&d, 1e6, -2.0, 0.004, k), compute_codes(&v, 1e6, -2.0, 0.004, k));
+            for j in 0..20 {
+                assert!(a.v[j] == b.v[j] || a.v[j].is_nan() && b.v[j].is_nan(), "k {k} v[{j}] {} vs {}", a.v[j], b.v[j]);
+            }
+        }
+    }
+
     /// Triangle (`ramp` false) or rising ramp of codes lo..hi, `f` Hz.
     fn tri(n: usize, fs: f32, f: f32, lo: f32, hi: f32, ramp: bool) -> Vec<u16> {
         (0..n)

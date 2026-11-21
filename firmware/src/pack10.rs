@@ -13,7 +13,22 @@
 pub trait Src {
     fn len(&self) -> usize;
     fn at(&self, i: usize) -> u16;
+    /// Codes i .. into `out` (as many as fit, to the end): how many. A
+    /// packed view reads them a group at a time (`Codes::read`); the
+    /// scope's measurements go through this (owner 2026-11-21: 16 ms a
+    /// 200 us/div screen with `at`).
+    #[inline(always)]
+    fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        let m = out.len().min(self.len().saturating_sub(i));
+        for (t, o) in out[..m].iter_mut().enumerate() {
+            *o = self.at(i + t);
+        }
+        m
+    }
 }
+
+/// `Src::read`'s chunk for the readers that loop over a view.
+pub const CHUNK: usize = 64;
 
 impl Src for [u16] {
     fn len(&self) -> usize {
@@ -124,6 +139,35 @@ fn scan_run(base: *const u8, mut j: usize, n: usize, acc: &mut (u16, u16, u32)) 
         j += 1;
     }
     *acc = (lo, hi, s);
+}
+
+/// Packed codes j .. j + out.len() at `base` (no wrap) into `out`.
+#[inline(always)]
+fn read_run(base: *const u8, mut j: usize, out: &mut [u16]) {
+    let end = j + out.len();
+    let mut t = 0;
+    while j < end && j & 3 != 0 {
+        out[t] = get(base, j);
+        t += 1;
+        j += 1;
+    }
+    // SAFETY: group g's 5 bytes are in the buffer (+ 3 of slack).
+    let mut p = unsafe { base.add(j / 4 * 5) };
+    while j + 4 <= end {
+        let (w, h) = unsafe { (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32) };
+        out[t] = (w & 0x3FF) as u16;
+        out[t + 1] = (w >> 10 & 0x3FF) as u16;
+        out[t + 2] = (w >> 20 & 0x3FF) as u16;
+        out[t + 3] = (w >> 30 | h << 2) as u16;
+        t += 4;
+        j += 4;
+        p = unsafe { p.add(5) };
+    }
+    while j < end {
+        out[t] = get(base, j);
+        t += 1;
+        j += 1;
+    }
 }
 
 /// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`
@@ -289,6 +333,27 @@ impl Codes {
         s as f32 / (b - a) as f32
     }
 
+    /// Codes i .. i + out.len() (to the end) into `out`: how many. Packed:
+    /// a group of 4 at a time, up to the ring's end and on from its start.
+    #[inline(never)]
+    pub fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        let m = out.len().min(self.len.saturating_sub(i));
+        if !self.packed() {
+            for (t, o) in out[..m].iter_mut().enumerate() {
+                *o = self.at(i + t);
+            }
+            return m;
+        }
+        let mut j = self.off + i;
+        if j >= self.cap {
+            j -= self.cap;
+        }
+        let first = (self.cap - j).min(m);
+        read_run(self.base, j, &mut out[..first]);
+        read_run(self.base, 0, &mut out[first..m]);
+        m
+    }
+
     /// A plain packed ring view (not the coded ring, not CH2).
     #[inline(always)]
     fn packed(&self) -> bool {
@@ -345,6 +410,10 @@ impl Src for Codes {
     #[inline(always)]
     fn at(&self, i: usize) -> u16 {
         Codes::at(self, i)
+    }
+    #[inline(always)]
+    fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        Codes::read(self, i, out)
     }
 }
 
