@@ -945,7 +945,6 @@ impl Ohm600 {
     /// the readings in it, kohm) is about one such digit or less (as the
     /// other ranges' extra digits: DC V 6 V shows its 10 uV at a ~7 uV mean
     /// sd); on at 0.7 digit, off above 1.3 (no flicker at the edge).
-    #[inline(never)] // .cold (link-native.x): 600 Mohm / nS only
     fn ext(&mut self, dec: u8) -> bool {
         let n = self.hn as usize;
         if n < OHM600_AVG {
