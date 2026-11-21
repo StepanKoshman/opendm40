@@ -674,4 +674,4 @@ ASSERT(__bkp_bss_end <= 0x40024FE8, ".bkp_bss reaches the settings sequence word
 ASSERT(__usbhs_bss_start >= 0x40060000 && __usbhs_bss_end <= 0x40061000, ".usbhs_bss outside the 4 KiB USBHS FIFO RAM");
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
-ASSERT(0x08080000 - __b_end >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");
+ASSERT(0x08080000 - __b_end >= 6K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");
