@@ -5,6 +5,21 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
+## v0.4.26-S2084 (2026-11-21)
+
+On v0.4.25-S2084. A release of
+[StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
+official opendm40 release.
+
+### Removed
+
+- **Touch test page** (owner, to free memory): **Settings > Other > Touch
+  test** and `DBG:TOUCH:TEST`. The touch log behind it is now only in a
+  `dbg-touch` build (`DBG:TOUCH?`).
+
+Кратко: страница проверки сенсора (Settings > Other > Touch test) удалена,
+чтобы освободить память.
+
 ## v0.4.25-S2084 (2026-11-20)
 
 On v0.4.24-S2084. A release of
@@ -758,8 +773,8 @@ null and fixes. Not an official opendm40 release.
   file `dm40_opendm40_v<version>.bin` show the same string.
 - Settings > More > More > Touch test: a page that shows every touch the
   controller reports, the points after the debounce and the touch keys,
-  against crosshair targets, to check the touch calibration
-  ([manual](docs/manual/README.md#touch-test)).
+  against crosshair targets, to check the touch calibration (removed in
+  0.4.26).
 
 ### Changed
 

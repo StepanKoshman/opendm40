@@ -43,9 +43,6 @@ mod app_ch2;
 mod app_inrush;
 #[path = "app_inrush_live.rs"]
 mod app_inrush_live;
-/// The touch test page (region C).
-#[path = "app_touchtest.rs"]
-mod app_touchtest;
 /// The protocol decoder view (region B: it runs while the scope streams).
 #[path = "app_decode.rs"]
 mod app_decode;
@@ -168,7 +165,6 @@ fn is_page(v: View) -> bool {
             | View::Gallery
             | View::Help
             | View::Inrush
-            | View::TouchTest
             | View::Decode
     )
 }
@@ -1062,7 +1058,6 @@ impl App {
             }
             View::Gallery => crate::gallery::get().draw(),
             View::Help => ui::help_page(self.help_page),
-            View::TouchTest => self.tt_draw(),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
@@ -1827,12 +1822,7 @@ impl App {
                     self.persist_now();
                     power_off();
                 }
-                if self.view == View::TouchTest {
-                    // The touch test page's exit (its touches and touch
-                    // keys are shown, not used): no lock toggle.
-                    self.pd6_click = None;
-                    self.tt_close(clk);
-                } else if self.pd6_click.take().is_some() {
+                if self.pd6_click.take().is_some() {
                     self.locked = !self.locked;
                     self.status_next = 0;
                     self.beep(now, 150);
@@ -1873,12 +1863,6 @@ impl App {
         }
         if self.view == View::Settings && self.set_tab == ui::TAB_OTHER && self.usb_ro_drawn != usb_ro() {
             self.redraw = true;
-        }
-        // A host started a logger session or the stream: the touch test
-        // page (region C) closes.
-        if self.view == View::TouchTest && self.tt_conflict().is_some() {
-            self.set_tab = ui::TAB_OTHER;
-            self.show(View::Settings, clk);
         }
         self.fuse_tick(clk, now);
         self.pw_entry_tick(now, can_draw);
@@ -3197,11 +3181,6 @@ impl App {
             }
             return false;
         }
-        // The touch test page shows touches and keys, it does not act on
-        // them (app_touchtest.rs).
-        if self.view == View::TouchTest {
-            return self.tt_gesture(g);
-        }
         if self.view == View::Decode {
             if let Some(c) = self.log_gesture(clk, g) {
                 return c;
@@ -3857,8 +3836,6 @@ impl App {
                 }
             }
             View::Gallery => {} // gestures go to gallery::touch (App::gesture)
-            // Gestures go to app_touchtest.rs (App::gesture).
-            View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
             // (The frame log handles its own taps: app_log.rs.)
             View::Decode => {}
@@ -4343,10 +4320,6 @@ impl App {
                     }
                     ui::S_DEVICE => {
                         self.show(View::Device, clk);
-                        return;
-                    }
-                    ui::S_TOUCH => {
-                        self.tt_open(clk);
                         return;
                     }
                     ui::S_ACC => {
@@ -5163,7 +5136,6 @@ impl App {
                 });
                 true
             }
-            C::DbgTouchTest(on) => self.tt_scpi(clk, on, out),
             C::DbgView => {
                 // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;

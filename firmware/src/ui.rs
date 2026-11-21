@@ -14,9 +14,6 @@ pub mod pw;
 /// The Inrush Current page (View::Inrush, app_inrush.rs).
 #[path = "ui_inrush.rs"]
 pub mod inr;
-/// The touch test page (View::TouchTest, app_touchtest.rs).
-#[path = "ui_touchtest.rs"]
-pub mod touchtest;
 /// The specified accuracy of a reading (../docs/dmm-accuracy.md).
 #[path = "accuracy.rs"]
 pub mod acc;
@@ -121,8 +118,6 @@ pub enum View {
     Help,
     /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
     Inrush,
-    /// Touch test (Settings > Other -> Touch test; app_touchtest.rs).
-    TouchTest,
     /// The protocol decoder's frame log (scope MF > Decode, Mode Log;
     /// app_log.rs).
     Decode,
@@ -3282,8 +3277,10 @@ pub const S_USB: u8 = 17;
 pub const S_BURDEN: u8 = 18;
 /// Opens the Device / About page (the stock section 6).
 pub const S_DEVICE: u8 = 19;
-/// Opens the touch test page (app_touchtest.rs).
-pub const S_TOUCH: u8 = 20;
+/// Id 20: the touch test page's row until 0.4.26 (removed, owner
+/// 2026-11-21); kept free so the ids after it stay.
+#[allow(dead_code)]
+pub const S_FREE_20: u8 = 20;
 /// The accuracy label (../docs/dmm-accuracy.md; default ON).
 pub const S_ACC: u8 = 21;
 /// Ohm readings below 0 (Dmm::ohm_neg; default OFF).
@@ -3302,28 +3299,28 @@ pub const SET_N: usize = 25;
 pub const SET_NAMES: [&str; SET_N] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
-    "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
+    "Danger alarm", "USB disk", "Burden voltage", "Device info", "", "Accuracy", "Negative ohm",
     "Mode Remember", "Continuity beep",
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
 /// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
-/// there) with its Device section and our help / touch test pages.
+/// there) with its Device section and our help page.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
     ("Alerts", &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    ("Other", &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP]),
+    ("Other", &[S_BT, S_USB, S_DEVICE, S_HELP]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
-/// Device / touch test / help rows (their pages return to it).
+/// Device / help rows (their pages return to it).
 pub const TAB_OTHER: u8 = 5;
 
 /// Rows that open a page (a ">" instead of a value).
 pub fn set_opens(id: u8) -> bool {
-    matches!(id, S_HELP | S_DEVICE | S_TOUCH)
+    matches!(id, S_HELP | S_DEVICE)
 }
 
 /// Rows with a -/+ stepper.
@@ -3770,7 +3767,6 @@ pub fn view_name(v: View) -> &'static str {
         View::Gallery => "Gallery",
         View::Help => "Help",
         View::Inrush => "Inrush",
-        View::TouchTest => "Touch test",
         View::Decode => "Decode log",
     }
 

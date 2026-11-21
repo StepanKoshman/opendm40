@@ -694,7 +694,6 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///                           (feature dbg-touch, else undefined header)
-///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///                           (feature dbg-prof, else undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
@@ -1030,9 +1029,6 @@ pub enum Cmd {
     DbgGest,
     /// DBG:VIEW?: the page shown (App::scpi).
     DbgView,
-    /// DBG:TOUCH:TEST ON|OFF (Some) / ? (None): the touch test page
-    /// (app_touchtest.rs).
-    DbgTouchTest(Option<bool>),
     /// DBG:READout?: the DMM readout as drawn (App::scpi).
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
@@ -2337,13 +2333,6 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
-                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"TOUCH" && kw(parts[2], "TEST") => {
-                    match (query, on_off(trim(arg))) {
-                        (true, _) => out = Out::Instr(Cmd::DbgTouchTest(None)),
-                        (false, Some(on)) => out = Out::Instr(Cmd::DbgTouchTest(Some(on))),
-                        _ => self.err_arg(no_arg, BAD),
-                    }
-                }
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "READout") => out = Out::Instr(Cmd::DbgReadout),
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]

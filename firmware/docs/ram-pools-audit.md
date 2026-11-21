@@ -120,7 +120,7 @@ All CPU-only, never on the ISR's paths (build.sh check), see
 | `vdisk::STATE` | 372 | backup | always (USB volume) |
 | `upload::UP` | 368 | backup | an upload / firmware staging |
 | `scope_csv::PLAN` | 264 | backup | one scope CSV save |
-| `app_touchtest::TT` | 168 | backup | page Touch test |
+| ~~`app_touchtest::TT`~~ | 168 | backup | removed in 0.4.26 (the touch test page) |
 | `csvlog::TAIL` | 4 096 | USBHS | CSV recording commits |
 
 ## 3. Activities and the concurrency matrix

@@ -250,12 +250,6 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/device", &page, false);
     save1(out, "device");
 
-    // Touch test page: taps on the targets (a scale error), MENU held.
-    host::reset(0);
-    super::touchtest_scene(2, false);
-    ck.check_opts("manual/touch-test", &[("screen", Bx::new(0, 0, 480, 320))], false);
-    save1(out, "touch-test");
-
     // On-screen help, page 1 (gestures).
     host::reset(0);
     ui::help_page(0);

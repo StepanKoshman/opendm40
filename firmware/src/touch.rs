@@ -954,16 +954,17 @@ fn screen(p: Point) -> Point {
 // the gesture decisions (gesture.rs logs into it), for checking real-finger
 // taps on the device. Single-threaded (opendm40 has no ISRs).
 
-/// Entries kept (12 bytes each); ~6 taps with all their frames. Without
-/// the feature `dbg-touch` (no DBG:TOUCH?), 16: the touch test page reads
-/// the new entries every pass, one touch poll after they were written (a
-/// poll logs one frame and its event, plus the gesture decisions).
-pub const LOG_N: usize = if cfg!(feature = "dbg-touch") { 160 } else { 16 };
+/// Entries kept (12 bytes each); ~6 taps with all their frames. Only in a
+/// `dbg-touch` build (DBG:TOUCH?): without it nothing reads the log (the
+/// touch test page was its other reader, removed 2026-11-21), so `log` is
+/// empty and the ring is not there.
+#[cfg(feature = "dbg-touch")]
+pub const LOG_N: usize = 160;
 
+#[cfg(feature = "dbg-touch")]
 #[derive(Clone, Copy)]
 struct LogEntry {
     /// ms since boot (low 32 bits).
-    #[cfg_attr(not(feature = "dbg-touch"), allow(dead_code))]
     t: u32,
     /// b'F' frame, b'E' debounced event, b'G' gesture.
     kind: u8,
@@ -978,17 +979,19 @@ struct LogEntry {
     y: u16,
 }
 
+#[cfg(feature = "dbg-touch")]
 struct Log {
     e: [LogEntry; LOG_N],
     /// Entries written since the last clear (the ring holds the last LOG_N).
     n: u32,
 }
 
-// TCM .bss (16 entries). The full log of a `dbg-touch` build is in
 // .sram_bss: TCM has no 1.9 KB to spare for it next to the stack.
-#[cfg_attr(all(target_os = "none", feature = "dbg-touch"), link_section = ".sram_bss")]
+#[cfg(feature = "dbg-touch")]
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
 
+#[cfg(feature = "dbg-touch")]
 fn log_ref() -> &'static mut Log {
     // SAFETY: single-threaded, no ISR touches the log, and no reference to it
     // is held across calls.
@@ -997,12 +1000,18 @@ fn log_ref() -> &'static mut Log {
 
 /// Append to the DBG:TOUCH? log (see `LogEntry` for the fields). Not
 /// inlined (five callers, once per touch frame / gesture event).
+#[cfg(feature = "dbg-touch")]
 #[inline(never)]
 pub fn log(kind: u8, now: u64, a: u8, b: u8, c: u8, p: Point) {
     let l = log_ref();
     l.e[l.n as usize % LOG_N] = LogEntry { t: now as u32, kind, a, b, c, x: p.x, y: p.y };
     l.n = l.n.wrapping_add(1);
 }
+
+/// No log without `dbg-touch`: the calls compile to nothing.
+#[cfg(not(feature = "dbg-touch"))]
+#[inline(always)]
+pub fn log(_kind: u8, _now: u64, _a: u8, _b: u8, _c: u8, _p: Point) {}
 
 #[cfg(feature = "dbg-touch")] // the DBG:TOUCH hook (main.rs)
 pub fn log_clear() {
@@ -1103,23 +1112,6 @@ impl W<'_> {
         }
         self.s(&t[i..]);
     }
-}
-
-/// Entries written to the log since the last clear (the ring holds the last
-/// LOG_N of them): the touch test page's cursor (app_touchtest.rs).
-pub fn log_count() -> u32 {
-    log_ref().n
-}
-
-/// Entry `i` (0 = the first since the last clear) as (kind, a, b, c, point),
-/// see `LogEntry`; None when not written yet or already overwritten.
-pub fn log_entry(i: u32) -> Option<(u8, u8, u8, u8, Point)> {
-    let l = log_ref();
-    if i >= l.n || l.n - i > LOG_N as u32 {
-        return None;
-    }
-    let e = l.e[i as usize % LOG_N];
-    Some((e.kind, e.a, e.b, e.c, Point { x: e.x, y: e.y }))
 }
 
 fn int_low() -> bool {

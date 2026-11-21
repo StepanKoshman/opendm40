@@ -1452,7 +1452,7 @@ stream ISR's paths:
 | `vdisk::STATE` | 372 | backup | SRAM `.dmabuf` | `init` (C); a few field loads per 512-byte sector in `read_block` / `read_busy` / `read_wait` |
 | `upload::UP` | 368 | backup | `.sram_bss` | per pass `active` flag; the upload is C (`begin`, `data_msg`, `flush`, `end`) |
 | `scope_csv::PLAN` | 264 | backup | SRAM `.dmabuf` | C only (`sp_save_csv`, `screenshot::step`) |
-| `app_touchtest::TT` | 168 | backup | `.sram_bss` | C only (the touch test page) |
+| ~~`app_touchtest::TT`~~ | 168 | backup | `.sram_bss` | removed in 0.4.26 with the touch test page |
 | `prof::P` (`dbg-prof` builds) | 984 | backup | `.sram_bss` | the profiler hooks (debug) |
 
 Proofs:
@@ -1505,8 +1505,7 @@ SRAM was already plain memory, kept over DBG:RESET, zero in a new run.
 the firmware starts, saves a setting, takes a screenshot, records a CSV
 long enough for several commits and a second 4 KiB block, reads its DLG
 and CSV with MMEM:DATA? and compares the CSV with
-[dlog.py](../tools/dlog.py) of the DLG byte for byte, opens the touch test
-page, then DBG:RESET: SETTINGS,BKP with the same record sequence number,
+[dlog.py](../tools/dlog.py) of the DLG byte for byte, then DBG:RESET: SETTINGS,BKP with the same record sequence number,
 the setting kept, and the same steps work again. The byte-written TAIL
 fails it.
 

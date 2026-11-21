@@ -16,8 +16,7 @@ One run:
   2. DBG:BOOT? SETTINGS,DEFAULTS; SYST:ALER:ALAR VOLUME; wait for SAVE,OK.
   3. The buffers in use: a screenshot (DBG:SWIPE D,3: screenshot::JOB), a
      CSV recording of --long seconds (csvlog::TAIL in the USBHS RAM: several
-     commits, more than one 4 KiB block), the touch test page opened and
-     closed (app_touchtest::TT), MMEM:CAT?. The recording's LOGnnn.DLG and
+     commits, more than one 4 KiB block), MMEM:CAT?. The recording's LOGnnn.DLG and
      LOGnnn.CSV are read with MMEM:DATA?: the CSV must equal
      firmware/tools/dlog.py of the DLG byte for byte. dm40.repl maps the
      USBHS RAM as peripherals/WordOnlyRam.cs (a byte store fills the whole
@@ -205,12 +204,6 @@ def use_buffers(l, pre, secs, min_dlg=0):
     n = check_log(l, pre, rows)
     if min_dlg:
         check((n or 0) > min_dlg, '%s: the DLG is %s bytes (> %d: more than one TAIL block)' % (pre, n, min_dlg))
-    l.w('DBG:TOUCH:TEST ON')
-    time.sleep(1)
-    check(l.q('DBG:TOUCH:TEST?') == '1', '%s: touch test page open' % pre)
-    l.w('DBG:TOUCH:TEST OFF')
-    time.sleep(1)
-    check(l.q('DBG:TOUCH:TEST?') == '0', '%s: touch test page closed' % pre)
     e = l.q('SYST:ERR?')
     check(e.startswith('0,'), '%s: SYST:ERR? %s' % (pre, e))
 

@@ -305,7 +305,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | csvlog::TAIL (USBHS RAM) | 4 096 | a CSV recording | FIFO_BUF | In the USBHS FIFO RAM ([native-boot.md, Extra RAM areas](native-boot.md#extra-ram-areas-2026-10-30-featsram-extra-areas)). |
 | gen::WAVE (SRAM) | 4 000 | while the generator outputs (DAC DMA, circular) | everything | Keep. |
 | dmm::acdctr::TR (SRAM) | 40 | DBG:ACDC:TRACE only with the `acdc-trace` feature (64 entries, 1 804) | | One unused entry without the feature. |
-| touch::LOG (TCM) | 196 | always (the touch test page; DBG:TOUCH? with `dbg-touch`, 1 924) | | 16 entries without the feature (SRAM audit). |
+| touch::LOG | 0 (1 924 with `dbg-touch`, .sram_bss) | DBG:TOUCH? only | | Not built without the feature since 0.4.26 (the touch test page, its other reader, removed). |
 | fastlog::JOB (SRAM) | 1 864 | a fast-log disk session | logger::RING | Keep. |
 | scope::ROLL_COLS (SRAM) | 1 600 | roll mode | | Keep. |
 | vwrite::W0 (SRAM) | 1 376 | the writable USB volume session | | Keep. |
