@@ -440,7 +440,6 @@ SECTIONS
          * during a fast-log session reached it (fastlogtest --ui-nav;
          * region B since 2026-10-23, ~0.2 KB). */
         *(.text.*8opendm402ui9menu_item*);
-        *(.text.*8opendm402ui9help_page*);
         *(.text.*8opendm402ui9list_page*);
         *(.text.*8opendm402ui10page_title*);
         *(.text.*8opendm402ui11set_stepper*);

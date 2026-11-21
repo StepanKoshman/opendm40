@@ -163,7 +163,6 @@ fn is_page(v: View) -> bool {
             | View::Limits
             | View::Record
             | View::Gallery
-            | View::Help
             | View::Inrush
             | View::Decode
     )
@@ -238,8 +237,6 @@ pub struct App {
     /// A new NTC user R25 / Beta while that sensor is active: re-enter it
     /// (kp_apply has no clock).
     ntc_reenter: bool,
-    /// Help page shown (UF-29, ui::HELP index).
-    help_page: usize,
     /// Settings > Other "USB disk" as drawn (in force, asked for): a bus reset
     /// that applies the mode repaints the page.
     usb_ro_drawn: (bool, bool),
@@ -748,7 +745,6 @@ impl App {
             pd6_raw: (false, 0, false),
             beep_until: 0,
             off_warned: 0,
-            help_page: 0,
             usb_ro_drawn: (true, true),
             tp_pressed: None,
             ntc_reenter: false,
@@ -1057,7 +1053,6 @@ impl App {
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
-            View::Help => ui::help_page(self.help_page),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
@@ -1657,7 +1652,7 @@ impl App {
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
-            View::Menu | View::Settings | View::Help | View::Gen | View::Scope => true,
+            View::Menu | View::Settings | View::Gen | View::Scope => true,
             View::Range => self.dmm.hy_mode() != 15 && !self.dmm.pw.on,
             _ => false,
         };
@@ -3694,7 +3689,6 @@ impl App {
                 // pop to the view they were opened from.
                 let v = match self.view {
                     View::Device => View::Menu,
-                    View::Help => View::Settings,
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
@@ -3843,16 +3837,6 @@ impl App {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
                 self.show(View::Settings, clk);
-            }
-            View::Help => {
-                // Title bar: back to Settings > Other (as MENU); elsewhere: the
-                // next help page (wraps).
-                if ui::title_back_hit(y) {
-                    self.show(View::Settings, clk);
-                } else {
-                    self.help_page = (self.help_page + 1) % ui::HELP.len();
-                    self.redraw = true;
-                }
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
@@ -4277,11 +4261,6 @@ impl App {
                             TAP_HALVES => TAP_OFF,
                             _ => TAP_CORNERS,
                         };
-                    }
-                    ui::S_HELP => {
-                        self.help_page = 0;
-                        self.show(View::Help, clk);
-                        return;
                     }
                     ui::S_JACK => {
                         // Jack alerts: ON (all) -> A-JACK only -> OFF -> ON.

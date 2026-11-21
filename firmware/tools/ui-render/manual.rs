@@ -250,12 +250,6 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/device", &page, false);
     save1(out, "device");
 
-    // On-screen help, page 1 (gestures).
-    host::reset(0);
-    ui::help_page(0);
-    ck.check_opts("manual/help", &page, false);
-    save1(out, "help");
-
     // Fuse check passed.
     {
         host::reset(0);

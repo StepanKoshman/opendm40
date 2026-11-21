@@ -256,7 +256,7 @@ def whats_new():
         ('new-scope', [('scope-tb-corner', 'Timebase corner taps'), ('scope-trig-pos', 'Trigger position drag'), ('scope-cur-x', 'CUR: cursors in one tap')]),
         ('new-gen', [('gen-clamped', 'The 50 kHz limit shown'), ('gen-triangle', 'An adjustable offset')]),
         ('new-data', [('record', 'The Record page'), ('gallery', 'The gallery')]),
-        ('new-other', [('auto-off', 'Power-off warning'), ('help', 'On-screen help'), ('device', 'The Device page')]),
+        ('new-other', [('auto-off', 'Power-off warning'), ('device', 'The Device page')]),
     ]:
         save(strip_of([i[0] for i in items], [i[1] for i in items]), name)
 

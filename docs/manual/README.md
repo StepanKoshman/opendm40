@@ -257,15 +257,6 @@ the combined view switches to the next sub-mode of the current function
 
 *The warning 30 s before the automatic power-off.*
 
-### On-screen help
-
-**Settings > Other > Help** opens two short help pages: gestures and side
-keys. Tap to turn the page.
-
-![The first help page: gestures](img/help.png)
-
-*The first help page: gestures.*
-
 ## What's new compared with the stock firmware
 
 opendm40 replaces the stock firmware V2.6. It keeps its look, its touch
@@ -428,13 +419,12 @@ lightning from 100 V). opendm40 adds:
 #### Other
 
 - A warning 30 s before the automatic power-off.
-- [On-screen help](#on-screen-help).
 - The [Device page](#the-device-page) shows the opendm40 version and the
   board temperature.
 
-![The power-off warning, the help, the Device page](img/new-other.png)
+![The power-off warning, the Device page](img/new-other.png)
 
-*The power-off warning, the help, the Device page.*
+*The power-off warning, the Device page.*
 
 #### What the stock firmware has and opendm40 does not
 
@@ -2543,7 +2533,6 @@ goes back to the main menu.
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Kept over a restart. |
 | **Device info** | | | Opens the [Device page](#the-device-page). |
-| **Help** | | | The [on-screen help](#on-screen-help). |
 
 ### The Device page
 

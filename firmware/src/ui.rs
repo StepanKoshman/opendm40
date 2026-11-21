@@ -114,8 +114,6 @@ pub enum View {
     Record,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
-    /// On-device help (UF-29), Settings > Other -> Help: HELP pages.
-    Help,
     /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
     Inrush,
     /// The protocol decoder's frame log (scope MF > Decode, Mode Log;
@@ -3263,8 +3261,10 @@ pub const S_TEMP_UNIT: u8 = 10;
 pub const S_SWIPE: u8 = 11;
 pub const S_PRESS: u8 = 12;
 pub const S_TAP_STEP: u8 = 13;
-/// Opens the help pages (UF-29).
-pub const S_HELP: u8 = 14;
+/// Id 14: the on-device help's row until 0.4.26 (removed, owner
+/// 2026-11-21); kept free so the ids after it stay.
+#[allow(dead_code)]
+pub const S_FREE_14: u8 = 14;
 /// The wrong-connection alerts (sentinel.rs; ON = all, A-JACK only, OFF).
 pub const S_JACK: u8 = 15;
 /// The danger alarm (danger.rs, doc 4.10: Loud / Volume / Off).
@@ -3298,29 +3298,29 @@ pub const SET_N: usize = 25;
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
-    "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
+    "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "", "Jack alerts",
     "Danger alarm", "USB disk", "Burden voltage", "Device info", "", "Accuracy", "Negative ohm",
     "Mode Remember", "Continuity beep",
 ];
 
 /// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
 /// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
-/// there) with its Device section and our help page.
+/// there) with its Device section.
 pub const SET_TABS: [(&str, &[u8]); 6] = [
     ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
     ("Alerts", &[S_VOLUME, S_CONT, S_ALARM, S_JACK]),
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    ("Other", &[S_BT, S_USB, S_DEVICE, S_HELP]),
+    ("Other", &[S_BT, S_USB, S_DEVICE]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
-/// Device / help rows (their pages return to it).
+/// Device row (its page returns to it).
 pub const TAB_OTHER: u8 = 5;
 
 /// Rows that open a page (a ">" instead of a value).
 pub fn set_opens(id: u8) -> bool {
-    matches!(id, S_HELP | S_DEVICE)
+    id == S_DEVICE
 }
 
 /// Rows with a -/+ stepper.
@@ -3765,87 +3765,12 @@ pub fn view_name(v: View) -> &'static str {
         View::Limits => "Hold & Limits",
         View::Record => "Record",
         View::Gallery => "Gallery",
-        View::Help => "Help",
         View::Inrush => "Inrush",
         View::Decode => "Decode log",
     }
 
 }
 
-/// On-device help (UF-29: owners have no manual; gestures, resets and limits
-/// were undiscoverable). Pages of (topic, what it does) rows in the settings
-/// list style; a tap below the title bar turns the page, the title bar or
-/// MENU goes back. The essentials only (region B audit #9: the old seven
-/// pages were 1.4 KB of region B text); the manual has the rest.
-pub const HELP: [(&str, &[(&str, &str)]); 2] = [
-    (
-        "Gestures",
-        &[
-            ("Swipe left / right", "Change view"),
-            ("Swipe down (DMM)", "Record on / off"),
-            ("3 fingers down", "Screenshot"),
-            ("2 fingers down", "Power off"),
-            ("Scope: drag marker", "Move that marker"),
-            ("Scope: side drag", "Trigger position"),
-            ("Scope: drag up/down", "Selected item"),
-        ],
-    ),
-    (
-        "Keys",
-        &[
-            ("MENU", "Menu / back"),
-            ("RUN", "Hold; run / stop"),
-            ("AUTO", "Autorange"),
-            ("MF", "Range / menu"),
-            ("Power key twice", "Touch lock"),
-        ],
-    ),
-];
-
-/// Help page `page` (0..HELP.len()): title "Help n/N: topic", the rows as
-/// the settings list (wider topic column: HELP_COL), the last row says
-/// what a tap does.
-/// The topic's box ends HELP_GAP before the value column: with the glyphs'
-/// blank edge column >= 1.5 TEXT22 word spaces of ink between them
-/// (closer, "Power key held 1.5 s Power off" read as one line; device
-/// check 92fb8fa; ui-render's line rule).
-pub const HELP_COL: i16 = 228;
-pub const HELP_GAP: i16 = 19;
-#[inline(never)] // .cold (link-native.x): not inlined into the hot caller
-pub fn help_page(page: usize) {
-    let (topic, rows) = &HELP[page % HELP.len()];
-    let mut t = [0u8; 40];
-    let mut n = 0;
-    let mut nb = [0u8; 4];
-    let mut put = |p: &str| {
-        let k = p.len().min(40 - n);
-        t[n..n + k].copy_from_slice(&p.as_bytes()[..k]);
-        n += k;
-    };
-    let digit = |b: &mut [u8; 4], d: usize| -> usize {
-        b[0] = b'0' + d as u8;
-        1
-    };
-    put("Help ");
-    let k = digit(&mut nb, page % HELP.len() + 1);
-    put(core::str::from_utf8(&nb[..k]).unwrap_or(""));
-    put("/");
-    let k = digit(&mut nb, HELP.len());
-    put(core::str::from_utf8(&nb[..k]).unwrap_or(""));
-    put(": ");
-    put(topic);
-    page_title(core::str::from_utf8(&t[..n]).unwrap_or("Help"));
-    lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
-    let next = HELP[(page + 1) % HELP.len()].0;
-    let last = ("Tap: next page", next);
-    for (i, (name, val)) in rows.iter().chain(core::iter::once(&last)).enumerate().take(SET_ROWS) {
-        let r = set_row(i);
-        sf::rbox(r, 6, M_TILE, M_BG);
-        let fg = if i + 1 == SET_ROWS { M_ACCENT } else { STATUS_FG };
-        sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, HELP_COL - HELP_GAP, r.h), name, fg, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(r.x + 12 + HELP_COL, r.y, r.w - 15 - HELP_COL, r.h), val, M_ACCENT, M_TILE, 1, 0);
-    }
-}
 
 /// opendm40 firmware version (ident.rs, the same as *IDN?). This is the
 /// replacement firmware's own version, NOT the stock "Software V2.6".

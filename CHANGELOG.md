@@ -16,9 +16,11 @@ official opendm40 release.
 - **Touch test page** (owner, to free memory): **Settings > Other > Touch
   test** and `DBG:TOUCH:TEST`. The touch log behind it is now only in a
   `dbg-touch` build (`DBG:TOUCH?`).
+- **On-screen help** (owner, to free memory): **Settings > Other > Help**
+  and its two pages (gestures, side keys). The manual covers them.
 
-Кратко: страница проверки сенсора (Settings > Other > Touch test) удалена,
-чтобы освободить память.
+Кратко: страница проверки сенсора (Settings > Other > Touch test) и справка
+на экране (Settings > Other > Help) удалены, чтобы освободить память.
 
 ## v0.4.25-S2084 (2026-11-20)
 

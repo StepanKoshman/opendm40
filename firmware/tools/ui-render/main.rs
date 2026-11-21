@@ -2740,21 +2740,6 @@ fn main() {
         }
     }
 
-    // 6f. Help pages (UF-29): whole page; every text fits its column.
-    for page in 0..ui::HELP.len() {
-        host::reset(0);
-        ui::help_page(page);
-        ck.check_opts(&format!("help/{page}"), &page_regions, false);
-        for (a, b) in ui::HELP[page].1.iter() {
-            ck.cases += 1;
-            let (wa, wb) = (stockfont::text_width(stockfont::TEXT22, a, 0), stockfont::text_width(stockfont::TEXT22, b, 0));
-            if wa > ui::HELP_COL - ui::HELP_GAP || wb > 464 - 15 - ui::HELP_COL {
-                ck.fail(&format!("help/{page}"), format!("too wide: {a:?} {wa} / {b:?} {wb}"));
-            }
-        }
-        save(&out, &format!("m05-help{page}"));
-    }
-
     // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
     // energy reset, the firmware install question (vwrite.rs).
     for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("fw-install", dialog::fw_install)] {
@@ -2776,7 +2761,6 @@ fn main() {
         defer_check(&mut ck, &format!("defer/settings{tab}"), || ui::settings(tab, &sv));
     }
     defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
-    defer_check(&mut ck, "defer/help", || ui::help_page(0));
     defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
     defer_check(&mut ck, "defer/dmm", || {
         dv.draw_static(Button::Volt, 1, false, false);
@@ -2796,7 +2780,6 @@ fn main() {
         strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
     }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
-    strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
     // The generator page's first strip draw after a boot (#153), each wave
     // as the boot default: the preview's strip cache as the device has it
@@ -3944,9 +3927,6 @@ fn main() {
         ui::pw::settings_page(&pcs[0].1);
         ui::pw::job_dialog(dmm::pw::JOB_VCAL);
         save(&out, "p22-power-vcal-dialog");
-        host::reset(0);
-        ui::help_page(ui::HELP.len() - 1);
-        save(&out, "p23-help-power");
         host::reset(0);
         let mut dv = ui::DmmView::new();
         dv.power = true;
