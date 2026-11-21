@@ -825,9 +825,11 @@ average restarts, so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears after the main digits on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V and every Ω range from 600 Ω to 60 MΩ, about
-1.6 s (MED in DC) or 3.2 s (SLOW, and in Ω) after the input settles. From
-600 kΩ mains hum and leakage dominate it (shielded leads help). Wherever it
+DC 600 mV, 6 V, 60 V, 600 V, every DC A, mA and µA range and every Ω range
+from 600 Ω to 60 MΩ, about 1.6 s (MED in DC V and A) or 3.2 s (MED in mA
+and µA, SLOW, and in Ω) after the input settles. From 600 kΩ mains hum and
+leakage dominate it (shielded leads help); on A it is 0.1 µV across the
+shunt, so the shunt's warming moves it. Wherever it
 can appear, the reading starts further left, so the other digits never move.
 
 #### Smoothing

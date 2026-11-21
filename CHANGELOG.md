@@ -11,6 +11,13 @@ On v0.4.25-S2084. A release of
 [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
 official opendm40 release.
 
+### Changed
+
+- **DMM: the extra digit on DC A, mA and µA** (owner). The averaging that
+  gives DC V its sixth digit now runs on current too (MED: 1.6 s in A,
+  3.2 s in mA / µA; SLOW: 6.4 s). In 0.4.24 it was switched on but the
+  current path dropped the flag, so the digit never showed.
+
 ### Removed
 
 - **Touch test page** (owner, to free memory): **Settings > Other > Touch
@@ -20,7 +27,8 @@ official opendm40 release.
   and its two pages (gestures, side keys). The manual covers them.
 
 Кратко: страница проверки сенсора (Settings > Other > Touch test) и справка
-на экране (Settings > Other > Help) удалены, чтобы освободить память.
+на экране (Settings > Other > Help) удалены, чтобы освободить память. На токе (DC A, mA, µA)
+появился шестой разряд, как на вольтметре.
 
 ## v0.4.25-S2084 (2026-11-20)
 
