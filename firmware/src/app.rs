@@ -3832,6 +3832,28 @@ impl App {
         self.redraw |= matches!(self.view, View::Range | View::Limits);
     }
 
+    /// A tap on the modulation page (View::GenMod): Back, the mode (Off /
+    /// AM / FM), the three keypads.
+    #[inline(never)] // .cold (link-native.x): the generator pages, no stream
+    fn gen_mod_tap(&mut self, clk: &mut Clock, y: u16) {
+        if ui::title_back_hit(y) {
+            self.show(View::Gen, clk);
+            return;
+        }
+        match ui::list_hit(y, ui::MOD_ROWS.len()) {
+            Some(0) => {
+                let mut st = self.gen.s;
+                let k = gen::Mod::ALL.iter().position(|&m| m == st.modu).unwrap_or(0);
+                st.modu = gen::Mod::ALL[(k + 1) % 3];
+                self.gen_set(st);
+            }
+            Some(1) => self.kp_open(KP_MOD_F, clk),
+            Some(2) => self.kp_open(KP_AM_D, clk),
+            Some(3) => self.kp_open(KP_FM_DEV, clk),
+            _ => {}
+        }
+    }
+
     #[inline(never)] // .cold (link-native.x): on a tap
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
@@ -4125,24 +4147,7 @@ impl App {
                 // so cycling back to Square restores it.
                 self.gen_set(st);
             }
-            View::GenMod => {
-                if ui::title_back_hit(y) {
-                    self.show(View::Gen, clk);
-                    return;
-                }
-                match ui::list_hit(y, ui::MOD_ROWS.len()) {
-                    Some(0) => {
-                        let mut st = self.gen.s;
-                        let k = gen::Mod::ALL.iter().position(|&m| m == st.modu).unwrap_or(0);
-                        st.modu = gen::Mod::ALL[(k + 1) % 3];
-                        self.gen_set(st);
-                    }
-                    Some(1) => self.kp_open(KP_MOD_F, clk),
-                    Some(2) => self.kp_open(KP_AM_D, clk),
-                    Some(3) => self.kp_open(KP_FM_DEV, clk),
-                    _ => {}
-                }
-            }
+            View::GenMod => self.gen_mod_tap(clk, y),
             View::Menu => match ui::main_menu_hit(x, y) {
                 Some(0) => self.show(View::Dmm, clk),
                 Some(1) => self.show(View::Scope, clk),
@@ -5407,6 +5412,58 @@ impl App {
         Some(r)
     }
 
+    /// SOUR:AM|FM:* (the generator's modulation, gen::Mod; one of AM / FM
+    /// at a time): set `g` (None, the caller applies it) or reply (Some).
+    #[inline(never)] // .cold (link-native.x): one SCPI command
+    fn scpi_gen_mod(&self, cmd: crate::scpi::Cmd, g: &mut gen::Settings, out: &mut crate::scpi::Scpi) -> Option<()> {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::GenModState(k, Some(on)) => {
+                let m = gen::Mod::ALL[k as usize % 3];
+                if on {
+                    g.modu = m;
+                } else if g.modu == m {
+                    g.modu = gen::Mod::Off;
+                }
+                None
+            }
+            C::GenModState(k, None) => {
+                out.put_bytes(if g.modu == gen::Mod::ALL[k as usize % 3] { b"1" } else { b"0" });
+                Some(())
+            }
+            C::GenModFreq(Some(f)) => {
+                g.mod_hz = f;
+                None
+            }
+            C::GenModFreq(None) => {
+                // The actual one while modulated (carrier / K), else the set.
+                let o = &self.gen.out;
+                out.put_f32(if o.mod_hz > 0.0 { o.mod_hz } else { g.mod_hz });
+                Some(())
+            }
+            C::GenAmDepth(Some(d)) => {
+                g.am_depth = d.clamp(0.0, 100.0) as u8;
+                None
+            }
+            C::GenAmDepth(None) => {
+                out.put_f32(g.am_depth as f32);
+                Some(())
+            }
+            C::GenFmDev(Some(d)) => {
+                g.fm_dev_hz = d;
+                None
+            }
+            C::GenFmDev(None) => {
+                // The deviation used while FM runs (limited around the
+                // carrier), else the set one.
+                let o = &self.gen.out;
+                out.put_f32(if o.fm_dev > 0.0 { o.fm_dev } else { g.fm_dev_hz });
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     /// SCPI scope / generator command. Writes the reply (if any) to `out` and
     /// returns true when there is one. Never inlined into main.rs `run`
     /// (one call site: LLVM may otherwise fold its ~10 KB into the hot loop's
@@ -5510,49 +5567,8 @@ impl App {
                 out.put_bytes(if g.on { b"1" } else { b"0" });
                 Some(())
             }
-            // Modulation (gen::Mod): one of AM / FM at a time.
-            C::GenModState(k, Some(on)) => {
-                let m = gen::Mod::ALL[k as usize % 3];
-                if on {
-                    g.modu = m;
-                } else if g.modu == m {
-                    g.modu = gen::Mod::Off;
-                }
-                None
-            }
-            C::GenModState(k, None) => {
-                out.put_bytes(if g.modu == gen::Mod::ALL[k as usize % 3] { b"1" } else { b"0" });
-                Some(())
-            }
-            C::GenModFreq(Some(f)) => {
-                g.mod_hz = f;
-                None
-            }
-            C::GenModFreq(None) => {
-                // The actual one while modulated (carrier / K), else the set.
-                let o = &self.gen.out;
-                out.put_f32(if o.mod_hz > 0.0 { o.mod_hz } else { g.mod_hz });
-                Some(())
-            }
-            C::GenAmDepth(Some(d)) => {
-                g.am_depth = d.clamp(0.0, 100.0) as u8;
-                None
-            }
-            C::GenAmDepth(None) => {
-                out.put_f32(g.am_depth as f32);
-                Some(())
-            }
-            C::GenFmDev(Some(d)) => {
-                g.fm_dev_hz = d;
-                None
-            }
-            C::GenFmDev(None) => {
-                // The deviation used while FM runs (limited around the
-                // carrier), else the set one.
-                let o = &self.gen.out;
-                out.put_f32(if o.fm_dev > 0.0 { o.fm_dev } else { g.fm_dev_hz });
-                Some(())
-            }
+            // Modulation (gen::Mod): App::scpi_gen_mod (region C).
+            C::GenModState(..) | C::GenModFreq(_) | C::GenAmDepth(_) | C::GenFmDev(_) => self.scpi_gen_mod(cmd, &mut g, out),
             C::TimScale(Some(t)) => {
                 sc.tb = scope::SDIV
                     .iter()

@@ -1590,6 +1590,39 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     Err(HDR)
 }
 
+/// SOUR:AM|FM:STATe / :DEPTh (AM) / :DEViation (FM) / :INTernal:FREQuency
+/// (the generator's modulation, gen::Mod), for `gen_scope_cmd`.
+#[inline(never)] // .cold (link-native.x): rarely sent
+fn gen_mod_cmd(parts: &[&[u8]], a: &[u8], query: bool) -> Result<Cmd, &'static str> {
+    let am = kw(parts[1], "AM");
+    let p2 = parts.get(2).copied().unwrap_or(&[]);
+    let num = |unit: &[u8], ok: fn(f32) -> bool| -> Result<Option<f32>, &'static str> {
+        if query {
+            return Ok(None);
+        }
+        match parse_num_u(a, unit) {
+            Some(v) if ok(v) => Ok(Some(v)),
+            Some(_) => Err(RANGE),
+            None => Err(BAD),
+        }
+    };
+    if kw(p2, "STATe") {
+        match (query, on_off(a)) {
+            (true, _) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, None)),
+            (false, Some(b)) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, Some(b))),
+            _ => Err(BAD),
+        }
+    } else if am && kw(p2, "DEPTh") {
+        Ok(Cmd::GenAmDepth(num(b"PCT", |v| (0.0..=100.0).contains(&v))?))
+    } else if !am && kw(p2, "DEViation") {
+        Ok(Cmd::GenFmDev(num(b"HZ", |v| v >= 0.0)?))
+    } else if kw(p2, "INTernal") && parts.len() >= 4 && kw(parts[3], "FREQuency") {
+        Ok(Cmd::GenModFreq(num(b"HZ", |v| v > 0.0)?))
+    } else {
+        Err("Undefined header")
+    }
+}
+
 /// SOURce / OUTPut / TIMebase / CHANnel1 / TRIGger (generator and scope).
 /// A query gives the query Cmd (None inside); a set gives Some(value) or an
 /// error (BAD: no such value, RANGE: outside the setting's domain); the
@@ -1628,25 +1661,7 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
         };
     }
     if kw(p0, "SOURce") && (kw(sub, "AM") || kw(sub, "FM")) {
-        // SOUR:AM|FM:STATe / :DEPTh (AM) / :DEViation (FM) /
-        // :INTernal:FREQuency (the generator's modulation, gen::Mod).
-        let am = kw(sub, "AM");
-        let p2 = parts.get(2).copied().unwrap_or(&[]);
-        return if kw(p2, "STATe") {
-            match (query, on_off(a)) {
-                (true, _) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, None)),
-                (false, Some(b)) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, Some(b))),
-                _ => Err(BAD),
-            }
-        } else if am && kw(p2, "DEPTh") {
-            Ok(Cmd::GenAmDepth(num(b"PCT", |v| (0.0..=100.0).contains(&v))?))
-        } else if !am && kw(p2, "DEViation") {
-            Ok(Cmd::GenFmDev(num(b"HZ", |v| v >= 0.0)?))
-        } else if kw(p2, "INTernal") && parts.len() >= 4 && kw(parts[3], "FREQuency") {
-            Ok(Cmd::GenModFreq(num(b"HZ", pos)?))
-        } else {
-            Err("Undefined header")
-        };
+        return gen_mod_cmd(parts, a, query);
     }
     if kw(p0, "SOURce") {
         return if kw(sub, "FUNCtion") && parts.len() >= 4 {
