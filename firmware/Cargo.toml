@@ -20,12 +20,7 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-# TEMPORARY diagnostic image (owner 2026-11-21, the 1.07 mA ohm test current
-# did not change the current): DBG:SENT:REG? / DBG:SRC in, the Modbus /
-# DALI decoders, the frame log and DPO out to make room. Restore the line
-# below after the check.
-# default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
-default = ["vdisk", "ad2-isr", "dbg-sent", "dbg-src"]
+default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
 # Digital phosphor (Display > Persist DPO / HOT; src/scope_dpo.rs): its 14 KB
 # of hit counts are the tail of the scope's record buffer while the phosphor
 # is shown (scope::DPO_K: the rings 7 K samples shorter then).
