@@ -1375,7 +1375,9 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // the 62 px badge; V / A is the unit's, as for "AC+DC").
         d.func = if r.is_ac() { "AutoAC" } else { "AutoDC" };
     }
-    if crate::dmm::is_ohm600(r.mode, r.range) {
+    if crate::dmm::is_ns(r.mode, r.range) {
+        d.func = "nS EXP";
+    } else if crate::dmm::is_ohm600(r.mode, r.range) {
         // The experimental 600 Mohm says so here too (the DMM page: EXP).
         d.func = "OhmEXP";
     }
@@ -1541,6 +1543,7 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6k\u{3a9}", Some(2)), ("60k\u{3a9}", Some(3)),
             ("600k\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
+            (OHMNS_ITEM, Some(8)),
         ],
         // Capacitance (owner 2026-10-30): dmm.rs ranges r1..r7 (one 60 nF
         // range for the stock's 6 / 60 nF rows: dmm::CAP_R_MIN), the mF
@@ -1576,6 +1579,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
         10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
+        10 if range == crate::dmm::OHMNS => Some("60nS"),
         0..=10 | 13 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
@@ -1609,6 +1613,11 @@ fn range_status(s: &str) {
 }
 
 fn range_rect(i: usize) -> sf::Rect {
+    if i == 9 {
+        // The Ohm page's nS item: the bottom row's free third column
+        // (Limits, Record, -, OK; NULL_BTN is right of 600 Mohm).
+        return bottom_rect(2);
+    }
     if i >= 8 {
         // The Ohm page's 600 Mohm item: the note row (141..177, free on
         // that page), two columns wide.
@@ -1622,12 +1631,16 @@ fn range_rect(i: usize) -> sf::Rect {
 /// buttons while it is chosen (its source is fixed: `ohm_vars_shown`).
 pub const OHM600_ITEM: &str = "600M\u{3a9} experimental";
 const OHM600_IDX: usize = 8;
+/// The nS (conductance) item (dmm::OHMNS), in the bottom row; the same
+/// source as 600 Mohm.
+pub const OHMNS_ITEM: &str = "60nS";
+const OHMNS_IDX: usize = 9;
 pub const OHM600_NOTE: &str = "100 nA";
 
 /// The Resistor Settings page shows the 0.90 / 0.28 mA buttons: not with
 /// 600 Mohm chosen (`sel`: the page's selected item).
 pub fn ohm_vars_shown(sel: Option<usize>) -> bool {
-    sel != Some(OHM600_IDX)
+    sel != Some(OHM600_IDX) && sel != Some(OHMNS_IDX)
 }
 
 /// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub

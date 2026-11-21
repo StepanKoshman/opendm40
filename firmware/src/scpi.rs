@@ -1140,6 +1140,8 @@ pub fn range_si(mode: u8, r: i8) -> Option<f32> {
         0 | 1 => 6.0 * p,
         2 | 3 => [0.06, 0.6][r.min(1)],
         4..=9 => [[6.0, 10.0], [0.06, 0.6], [6e-4, 6e-3]][((mode - 4) % 3) as usize][r.min(1)],
+        // Ohm r8: the nS range (dmm::OHMNS), 60 nS.
+        10 if r == 8 => 60e-9,
         10 => 60.0 * p,
         13 => 6e-9 * p,
         14 => 60.0 * p,

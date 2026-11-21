@@ -678,6 +678,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
         ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
         ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
+        // The nS range (r8): two decimals, "nS EXP".
+        ("ohm_ns", Reading { range: dmm::OHMNS, auto: false, ..rd(10, val(-12.34, 2, "nS"), None, None, false) }, None),
+        ("ohm_ns_ol", Reading { range: dmm::OHMNS, auto: false, ..rd(10, ol(2, "nS"), None, None, false) }, None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.

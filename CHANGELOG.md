@@ -11,6 +11,13 @@ On v0.4.25-S2084. A release of
 [StepanKoshman/opendm40](https://github.com/StepanKoshman/opendm40); not an
 official opendm40 release.
 
+### Added
+
+- **DMM: 60 nS conductance range** (owner). Ω range page, bottom row
+  **60nS**: G = 1/R on the 600 MΩ source and phases, 60.00 nS (16.7 MΩ)
+  down to 0.01 nS (100 GΩ). The jacks' leakage only adds to it, so REL on
+  open leads takes it off. The unit fonts got an S.
+
 ### Changed
 
 - **DMM: the extra digit on DC A, mA and µA** (owner). The averaging that
@@ -28,7 +35,8 @@ official opendm40 release.
 
 Кратко: страница проверки сенсора (Settings > Other > Touch test) и справка
 на экране (Settings > Other > Help) удалены, чтобы освободить память. На токе (DC A, mA, µA)
-появился шестой разряд, как на вольтметре.
+появился шестой разряд, как на вольтметре. Новый диапазон проводимости 60 nS
+(страница диапазонов Ω) для сопротивлений до 100 ГОм.
 
 ## v0.4.25-S2084 (2026-11-20)
 

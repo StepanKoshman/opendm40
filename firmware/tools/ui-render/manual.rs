@@ -206,6 +206,12 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm-600m", &page, false);
     save1(out, "range-ohm-600m");
 
+    // The nS range chosen on the range page.
+    host::reset(0);
+    ui::range_page(Button::Ohm, Some(9), 0, None);
+    ck.check_opts("manual/range-ohm-ns", &page, false);
+    save1(out, "range-ohm-ns");
+
     // Capacitance range page: 600 uF fixed.
     host::reset(0);
     ui::range_page(Button::Cap, Some(4), 0, None);
@@ -319,6 +325,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
+        // The nS range: 2.15 nS (465 Mohm).
+        ("dmm-ohm-ns", Dp { rate: false, ..dp(Reading { range: dmm::OHMNS, auto: false, ..rd(10, val(2.15, 2, "nS"), None, None, false) }) }),
         // Capacitance: the discharge before 600 uF and up, and its warning
         // (the second only for the layout check).
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),

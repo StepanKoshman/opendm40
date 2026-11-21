@@ -569,7 +569,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ (and an
-  experimental 600 MΩ, below). 60 Ω shows
+  experimental 600 MΩ and a 60 nS conductance range, below). 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
@@ -590,6 +590,16 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **60nS** (range page, bottom row; never AUTO): conductance, the
+  reciprocal of resistance, for very high resistances: 60.00 nS = 16.7 MΩ,
+  1.00 nS = 1 GΩ, 0.01 nS = 100 GΩ. The same source and timing as 600 MΩ
+  (105 nA at most, a reading per ~2 s), no accuracy spec. A leakage across
+  the jacks (the meter's own, your leads, your fingers) adds to the
+  reading, so: leave the leads open, wait for a steady reading and press
+  **REL**; then connect the part. The leakage 600 MΩ has learned is already
+  taken off. Readings a little below 0 are noise. **0L** above 60 nS
+  (below 16.7 MΩ, or shorted leads). Over USB / Bluetooth the reading is in
+  siemens (`FUNC?` stays `RES`).
 - **Null** (range page, beside 600MΩ experimental): the resistance of your
   test leads, taken off every reading. Short the leads, wait for a steady
   reading, tap **Null**: the button shows the value (for example **Null
@@ -605,6 +615,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 | 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
 | ![412.3 MΩ on 600 MΩ](img/dmm-ohm-600m.png) | ![The range page with 600 MΩ chosen](img/range-ohm-600m.png) |
 | The experimental 600 MΩ: test current 105 nA | The range page with 600 MΩ chosen |
+| ![2.15 nS on 60 nS](img/dmm-ohm-ns.png) | ![The range page with 60 nS chosen](img/range-ohm-ns.png) |
+| 2.15 nS (465 MΩ) on 60 nS | The range page with 60 nS chosen |
 
 #### Continuity
 

@@ -72,6 +72,8 @@ pub fn mode_full_scale(mode: u8, range: i8, dec: u8, unit: &str) -> f32 {
             s
         }
         10 if range == 7 => 600.0,
+        // nS (dmm::OHMNS): 60.00 nS.
+        10 if range == 8 => 60.0,
         _ => full_scale(dec, unit),
     }
 }
