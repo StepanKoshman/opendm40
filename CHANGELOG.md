@@ -41,6 +41,12 @@ official opendm40 release.
   time only for the first conversion after entering Ω (was 2.5 s), then by
   as many ranges as the reading says. AC+DC, AC mV / A and the up steps of
   current are unchanged.
+- **Scope: finer DPO / HOT and faster drawing** (owner). The phosphor's
+  cells are 2 rows high instead of 4, so a slope no longer shows 4-row
+  steps; it keeps a level per cell instead of a count, in the same memory,
+  so the record is as long as before. The columns' min / max (and Hi-res
+  mean) read the record four samples at a time: a 200 µs/div frame built
+  in 5.1 ms before.
 
 ### Removed
 
@@ -55,7 +61,8 @@ official opendm40 release.
 появился шестой разряд, как на вольтметре. Новый диапазон проводимости 60 nS
 (страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
 (поле под предпросмотром). Автовыбор диапазона быстрее: DC V / mV, DC A, AC V и Ω
-переходят сразу на нужный диапазон, а не по одному.
+переходят сразу на нужный диапазон, а не по одному. DPO и HOT в осциллографе без ступенек
+(ячейки 2 пикселя вместо 4), и кадр строится быстрее.
 
 ## v0.4.25-S2084 (2026-11-20)
 

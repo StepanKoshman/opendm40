@@ -84,6 +84,38 @@ pub fn get(base: *const u8, i: usize) -> u16 {
     (unsafe { core::ptr::read_unaligned(base.add(b >> 3) as *const u32) } >> (b & 7)) as u16 & 0x3FF
 }
 
+/// Min / max / sum of the packed codes j .. j + n at `base` (no wrap) into
+/// `acc`: single codes up to a group boundary, then whole groups.
+#[inline(always)]
+fn scan_run(base: *const u8, mut j: usize, n: usize, acc: &mut (u16, u16, u32)) {
+    let end = j + n;
+    let mut put = |v: u16| {
+        acc.0 = acc.0.min(v);
+        acc.1 = acc.1.max(v);
+        acc.2 += v as u32;
+    };
+    while j < end && j & 3 != 0 {
+        put(get(base, j));
+        j += 1;
+    }
+    while j + 4 <= end {
+        // SAFETY: group j / 4's 5 bytes are in the buffer (+ 3 of slack).
+        let (w, h) = unsafe {
+            let p = base.add(j / 4 * 5);
+            (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32)
+        };
+        put((w & 0x3FF) as u16);
+        put((w >> 10 & 0x3FF) as u16);
+        put((w >> 20 & 0x3FF) as u16);
+        put((w >> 30 | h << 2) as u16);
+        j += 4;
+    }
+    while j < end {
+        put(get(base, j));
+        j += 1;
+    }
+}
+
 /// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`
 /// (host tests; the scope writes cring.rs's blocks: `set_at`).
 #[cfg(not(target_os = "none"))]
@@ -235,11 +267,39 @@ impl Codes {
         if a >= b {
             return 512.0;
         }
-        let mut s = 0u32;
-        for i in a..b {
-            s += self.at(i) as u32;
-        }
+        let s = if self.packed() {
+            self.scan(a, b).2
+        } else {
+            let mut s = 0u32;
+            for i in a..b {
+                s += self.at(i) as u32;
+            }
+            s
+        };
         s as f32 / (b - a) as f32
+    }
+
+    /// A plain packed ring view (not the coded ring, not CH2).
+    #[inline(always)]
+    fn packed(&self) -> bool {
+        self.cap != 0 && self.cap != CH2_VIEW
+    }
+
+    /// Min, max and sum of codes a .. b (b <= len) of a packed view, a group
+    /// of 4 codes (5 bytes) a step (owner 2026-11-21, scope drawing speed:
+    /// the per-code `at` took 5 ms for the 25 000 codes of a 200 us/div
+    /// screen).
+    #[inline(never)]
+    fn scan(&self, a: usize, b: usize) -> (u16, u16, u32) {
+        let mut acc = (u16::MAX, 0u16, 0u32);
+        let j = self.off + a;
+        let n = b.saturating_sub(a);
+        // Up to the ring's end, then from its start.
+        let first = if j >= self.cap { 0 } else { (self.cap - j).min(n) };
+        let j0 = if j >= self.cap { j - self.cap } else { j };
+        scan_run(self.base, j0, first, &mut acc);
+        scan_run(self.base, if first == 0 { j0 } else { 0 }, n - first, &mut acc);
+        acc
     }
 
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).
@@ -252,6 +312,10 @@ impl Codes {
             }
             // SAFETY: CODED_MM is set once at start-up.
             return unsafe { (*core::ptr::addr_of!(CODED_MM))(self.off.wrapping_add(a) as u32, b - a) };
+        }
+        if self.packed() {
+            let (lo, hi, _) = self.scan(a, b.min(self.len));
+            return (lo, hi);
         }
         let (mut lo, mut hi) = (u16::MAX, 0u16);
         for i in a..b.min(self.len) {
@@ -297,5 +361,39 @@ mod tests {
         assert_eq!(c.at(3), get(p, 63));
         assert_eq!(c.at(4), get(p, 0));
         assert_eq!(c.sub(2, 6).at(2), get(p, 0));
+    }
+
+    #[test]
+    fn group_scan_matches_per_code() {
+        // A ring of 1003 codes (not a multiple of 4), views at every
+        // alignment, wrapping or not, against the per-code reads.
+        let cap = 1003;
+        let mut buf = std::vec![0u16; cap + 4];
+        for i in 0..cap {
+            buf[i] = ((i * 7919 + 13) % 1021) as u16;
+        }
+        let p = buf.as_mut_ptr() as *mut u8;
+        pack_in_place(p, cap / 4 * 4);
+        for i in cap / 4 * 4..cap {
+            set(p, i, ((i * 7919 + 13) % 1021) as u16);
+        }
+        for off in [0, 1, 2, 3, 5, 500, 997, 998, 1000, 1002] {
+            for len in [0, 1, 3, 4, 7, 9, 64, 400, 1003] {
+                let c = Codes::new(p, off, len, cap);
+                for (a, b) in [(0, len), (1.min(len), len), (len / 3, len - len / 4)] {
+                    let (mut lo, mut hi, mut s) = (u16::MAX, 0u16, 0u32);
+                    for i in a..b {
+                        let v = get(p, (off + i) % cap);
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                        s += v as u32;
+                    }
+                    assert_eq!(c.min_max(a, b), (lo, hi), "off {off} len {len} {a}..{b}");
+                    if b > a {
+                        assert_eq!(c.mean(a, b), s as f32 / (b - a) as f32, "off {off} len {len} {a}..{b}");
+                    }
+                }
+            }
+        }
     }
 }
