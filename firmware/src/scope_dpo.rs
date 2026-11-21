@@ -7,8 +7,8 @@
 //! false, scope_page.rs sp_dpo_more) lights a dark cell with HIT / 2 only,
 //! so a rare event shows at once and the shares stay those of the shown
 //! frames. The counts decay in time, not per frame: every 4th frame a group
-//! of columns (four interleaved groups, one a frame) loses c x dt / tau (at
-//! least 1), tau from Display > Decay (`DECAY_MS`; INF: none). A cell hit
+//! of cells (four groups scattered by a hash, one a frame) loses c x dt /
+//! tau (at least 1), tau from Display > Decay (`DECAY_MS`; INF: none). A cell hit
 //! in a share p of the frames settles near HIT x p x frames-per-tau. The
 //! colour is a level 1..15 of the count on a log scale (`LEVEL`: 1 .. 200
 //! in 14 equal ratios, 200 and above the top level), as a real DPO's
@@ -90,6 +90,14 @@ fn count_in(l: u8, rng: &mut u32) -> u8 {
             a + (((x >> 16) * (b - a) as u32) >> 16) as u8
         }
     }
+}
+
+/// The decay group (0..3) of cell `j` in column `i`: a hash, so a frame's
+/// decay is spread over the graph with no column or row pattern.
+#[inline(always)]
+fn group(i: usize, j: usize) -> usize {
+    let h = (i as u32).wrapping_mul(0x9E37_79B1) ^ (j as u32).wrapping_mul(0x85EB_CA77);
+    (h >> 30) as usize
 }
 
 /// Level of cell `b` in column `i` (two cells a byte: even ones low).
@@ -272,7 +280,8 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
 
 /// One fresh frame: `tr` = CH1's frame rows per column (EMPTY: none),
 /// frame height `h`, the time `now` (ms) and the decay `tau` (ms, 0: INF);
-/// then this frame's group of columns decays by the time since it last did.
+/// then this frame's group of cells (`group`) decays by the time since it
+/// last did.
 pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     let Some(cnt) = cnt() else {
         return;
@@ -297,13 +306,19 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     }
     // c -= c x k / 256, at least 1 (k = 256 x dt / tau, at most 256).
     let k = ((dt as u64 * 256 / tau as u64).min(256)) as u32;
-    for i in (g..su::NCOL).step_by(4) {
+    // The group: a fixed scatter of the cells, not every 4th column (owner
+    // 2026-11-21: the column groups' 4-frame decay cycle showed as slowly
+    // drifting vertical bands across the whole trace in DPO and HOT).
+    for i in 0..su::NCOL {
         for jb in 0..NB / 2 {
             // (both cells of the byte dark: the common case, one test)
             if cnt[i * (NB / 2) + jb] == 0 {
                 continue;
             }
             for j in [2 * jb, 2 * jb + 1] {
+                if group(i, j) != g {
+                    continue;
+                }
                 let l = lv(cnt, i, j);
                 if l == 0 {
                     continue;
