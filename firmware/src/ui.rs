@@ -2808,6 +2808,7 @@ pub fn gen_mod_hit(x: u16, y: u16) -> bool {
 /// The Mod box: "Mod: Off", "AM 100.00Hz 50%", "FM 100.00Hz 2000Hz" (the
 /// actual modulation frequency; orange when the table raised it, grey with
 /// "n/a" on the PWM square).
+#[inline(never)] // .cold (link-native.x): the generator page, no stream there
 fn gen_mod_box(g: &gen::Gen, bg: Color) {
     let s = &g.s;
     let mut b = [0u8; 24];

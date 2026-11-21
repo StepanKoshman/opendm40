@@ -146,6 +146,14 @@ SECTIONS
         *(.text.*8opendm404fcnt*);
         *(.text.*8opendm405scope5Scope9fcnt_poll*);
         *(.text.*8opendm408scope_ui7ctr_row*);
+        /* The generator's modulation (owner 2026-11-21): its plan and table
+         * (a settings change; SCPI SOUR:AM / FM while a stream runs is the
+         * host's own doing, as inrush_scpi), the Mod box and its page (the
+         * generator pages, where no stream runs). */
+        *(.text.*8opendm403gen4plan8mod_plan*);
+        *(.text.*8opendm403gen4plan8fill_mod*);
+        *(.text.*8opendm402ui11gen_mod_box*);
+        *(.text.*8opendm402ui12gen_mod_page*);
         /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
          * loop and asm are `.text.a2.*` (zero-wait region A2). */
         *(.text.*8opendm408memprobe*);

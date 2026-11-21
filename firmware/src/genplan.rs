@@ -592,6 +592,7 @@ pub fn fm_dev(s: &Settings, fc: f32) -> f32 {
 /// FM frequency), tables of L = K MOD_SPC (peak) ..= N_MAX samples and M =
 /// 200 MHz K / (fc L) (floor / ceil, >= DIV_MIN), the smallest carrier
 /// error, then the largest L within SLACK_PPM of it (as `plan_dac`).
+#[inline(never)] // .cold (link-native.x): on a settings change only
 pub fn mod_plan(s: &Settings) -> (Timing, bool) {
     let fc = target_hz(s.wave, s.freq_hz);
     let dev = if s.modu == Mod::Fm { fm_dev(s, fc as f32) } else { 0.0 };
@@ -738,6 +739,7 @@ pub fn fill(table: &mut [u16], s: &Settings, t: &Timing) {
 /// with beta = deviation / modulation frequency (FM). AM: the carrier's
 /// deviation from the centre times (1 + m sin(2 pi x)) / (1 + m), so the
 /// peaks stay within lo..hi.
+#[inline(never)] // .cold (link-native.x): on a settings change only
 fn fill_mod(table: &mut [u16], s: &Settings, t: &Timing) {
     const TAU: f32 = 2.0 * core::f32::consts::PI;
     let (lo, hi) = levels(s);
