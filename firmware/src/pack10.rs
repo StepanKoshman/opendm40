@@ -141,32 +141,38 @@ fn scan_run(base: *const u8, mut j: usize, n: usize, acc: &mut (u16, u16, u32)) 
     *acc = (lo, hi, s);
 }
 
-/// Packed codes j .. j + out.len() at `base` (no wrap) into `out`.
+/// Packed codes j .. j + out.len() at `base` (no wrap) into `out`
+/// (pointer writes: the indexed ones kept a bounds check each at
+/// opt-level "z").
 #[inline(always)]
 fn read_run(base: *const u8, mut j: usize, out: &mut [u16]) {
     let end = j + out.len();
-    let mut t = 0;
-    while j < end && j & 3 != 0 {
-        out[t] = get(base, j);
-        t += 1;
-        j += 1;
-    }
-    // SAFETY: group g's 5 bytes are in the buffer (+ 3 of slack).
-    let mut p = unsafe { base.add(j / 4 * 5) };
-    while j + 4 <= end {
-        let (w, h) = unsafe { (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32) };
-        out[t] = (w & 0x3FF) as u16;
-        out[t + 1] = (w >> 10 & 0x3FF) as u16;
-        out[t + 2] = (w >> 20 & 0x3FF) as u16;
-        out[t + 3] = (w >> 30 | h << 2) as u16;
-        t += 4;
-        j += 4;
-        p = unsafe { p.add(5) };
-    }
-    while j < end {
-        out[t] = get(base, j);
-        t += 1;
-        j += 1;
+    let mut o = out.as_mut_ptr();
+    // SAFETY: `o` stays inside `out` (one write per code j .. end); group
+    // g's 5 bytes are in the buffer (+ 3 of slack).
+    unsafe {
+        while j < end && j & 3 != 0 {
+            o.write(get(base, j));
+            o = o.add(1);
+            j += 1;
+        }
+        let mut p = base.add(j / 4 * 5);
+        while j + 4 <= end {
+            let w = core::ptr::read_unaligned(p as *const u32);
+            let h = *p.add(4) as u32;
+            o.write((w & 0x3FF) as u16);
+            o.add(1).write((w >> 10 & 0x3FF) as u16);
+            o.add(2).write((w >> 20 & 0x3FF) as u16);
+            o.add(3).write((w >> 30 | h << 2) as u16);
+            o = o.add(4);
+            p = p.add(5);
+            j += 4;
+        }
+        while j < end {
+            o.write(get(base, j));
+            o = o.add(1);
+            j += 1;
+        }
     }
 }
 

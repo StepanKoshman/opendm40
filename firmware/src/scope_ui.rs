@@ -1971,19 +1971,27 @@ impl Deco {
 /// No data in a column.
 pub const EMPTY: (i16, i16) = (i16::MAX, i16::MIN);
 
-/// Two columns' row arrays equal, as one memory compare (the derived ==
-/// of the tuples stayed a call per element at opt-level "z": the flush's
-/// "nothing changed" test of five arrays took ~0.3 ms every pass).
+/// Two columns' row arrays equal: a word loop with an early exit (the
+/// derived == of the tuples was a call per element at opt-level "z", and
+/// the slice == a byte-wise memcmp, slower still: fl.pre 0.46 ms a flush
+/// call on the device).
 #[inline(never)]
 fn same(a: &[(i16, i16); NCOL], b: &[(i16, i16); NCOL]) -> bool {
-    // SAFETY: (i16, i16) is 4 bytes, no padding; both arrays NCOL long.
-    let (x, y) = unsafe {
-        (
-            core::slice::from_raw_parts(a.as_ptr() as *const u32, NCOL),
-            core::slice::from_raw_parts(b.as_ptr() as *const u32, NCOL),
-        )
-    };
-    x == y
+    let (mut p, mut q) = (a.as_ptr() as *const u32, b.as_ptr() as *const u32);
+    for _ in 0..NCOL {
+        // SAFETY: (i16, i16) is 4 bytes, 2-aligned, no padding; NCOL of
+        // them in each array (unaligned reads: the arrays are i16-aligned).
+        let (x, y) = unsafe { (p.read_unaligned(), q.read_unaligned()) };
+        if x != y {
+            return false;
+        }
+        // SAFETY: still inside the arrays (at most one past the end).
+        unsafe {
+            p = p.add(1);
+            q = q.add(1);
+        }
+    }
+    true
 }
 
 /// The graph: what each column shows and what is on the panel.
