@@ -115,6 +115,40 @@ impl Wave {
     }
 }
 
+/// Modulation of the DAC waves (owner 2026-11-21). The table then holds one
+/// modulation period with a whole number K of carrier periods in it (K =
+/// carrier / modulation, rounded), already modulated, so it still plays
+/// from DMA alone: AM scales the carrier around the centre level, FM moves
+/// its phase (continuous at the table's wrap: the phase deviation is a
+/// sine of the modulation period). The modulating wave is a sine.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mod {
+    Off,
+    Am,
+    Fm,
+}
+
+impl Mod {
+    pub const ALL: [Mod; 3] = [Mod::Off, Mod::Am, Mod::Fm];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Mod::Off => "Off",
+            Mod::Am => "AM",
+            Mod::Fm => "FM",
+        }
+    }
+}
+
+/// Samples per carrier period at least (FM: at its highest frequency) in a
+/// modulated table: K <= N_MAX / MOD_SPC carrier periods per modulation
+/// period (100 at 20).
+pub const MOD_SPC: u32 = 20;
+/// Settable modulation frequency, Hz (the table's K then raises it to at
+/// least carrier / (N_MAX / MOD_SPC)).
+pub const MOD_F_MIN: f32 = 0.1;
+pub const MOD_F_MAX: f32 = 25_000.0;
+
 /// Per-wave limits for UI and SCPI range checks.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Limits {
@@ -157,13 +191,33 @@ pub struct Settings {
     /// [Vpp/2, 3.0 - Vpp/2] so that the whole waveform stays inside the
     /// unipolar 0..3 V output (FR-28).
     pub offset_v: Option<f32>,
+    /// Modulation (DAC path only: not a square above 50 kHz).
+    pub modu: Mod,
+    /// The set modulation frequency, Hz (MOD_F_MIN .. MOD_F_MAX).
+    pub mod_hz: f32,
+    /// AM depth, 0..100 %.
+    pub am_depth: u8,
+    /// FM peak deviation, Hz (0 .. 50 kHz; the output keeps it within 0 ..
+    /// the wave's limit around the carrier, `Out::fm_dev`).
+    pub fm_dev_hz: f32,
 }
 
 impl Settings {
     // Stock power-on defaults (scope_gen_ui_v2_6.h:318-320, 556-559; the ui header
     // corrects the gen header's "wave default 0" to wave 1 = Square at 2 MHz).
     pub const DEFAULT: Settings =
-        Settings { on: false, wave: Wave::Square, freq_hz: 2_000_000, amp_v: 3.0, duty: 5000, offset_v: None };
+        Settings {
+            on: false,
+            wave: Wave::Square,
+            freq_hz: 2_000_000,
+            amp_v: 3.0,
+            duty: 5000,
+            offset_v: None,
+            modu: Mod::Off,
+            mod_hz: 100.0,
+            am_depth: 50,
+            fm_dev_hz: 1000.0,
+        };
 
     /// All fields in range. Keeps `freq_hz` as set apart from the global
     /// 1 Hz .. 10 MHz clamp (the per-wave clamp happens at output time).
@@ -177,7 +231,16 @@ impl Settings {
             Some(o) if o.is_finite() => Some(o.clamp(s.amp_v / 2.0, V_FS - s.amp_v / 2.0)),
             _ => None,
         };
+        s.mod_hz = if s.mod_hz.is_finite() { s.mod_hz.clamp(MOD_F_MIN, MOD_F_MAX) } else { 100.0 };
+        s.am_depth = s.am_depth.min(100);
+        s.fm_dev_hz = if s.fm_dev_hz.is_finite() { s.fm_dev_hz.clamp(0.0, DAC_WAVE_MAX as f32) } else { 0.0 };
         s
+    }
+
+    /// The output is modulated: modulation on and the DAC path (a square
+    /// above 50 kHz runs on the PWM timer, unmodulated).
+    pub fn modulated(&self) -> bool {
+        self.modu != Mod::Off && !(self.wave == Wave::Square && target_hz(self.wave, self.freq_hz) > SQUARE_DAC_MAX)
     }
 
     /// Set Vpp. With an explicit offset, Vpp is limited so that the waveform
@@ -463,6 +526,13 @@ pub struct Out {
     /// Effective square duty, 0..10000 (quantised to the table or PWM
     /// counter). Other waves: the set value, unused.
     pub duty: u16,
+    /// Modulated (`Settings::modulated`): the actual modulation frequency
+    /// (carrier / K, Hz) and FM deviation (Hz); 0 when not.
+    pub mod_hz: f32,
+    pub fm_dev: f32,
+    /// The modulation frequency was raised to fit the table (carrier /
+    /// modulation above N_MAX / MOD_SPC, `mod_plan`).
+    pub mod_clamped: bool,
 }
 
 impl Out {
@@ -509,11 +579,67 @@ fn square_high(len: u32, duty: u16) -> u32 {
     (len * duty as u32 + 5000) / 10000
 }
 
+/// FM deviation the output uses for `s` at carrier `fc`: the set one, at
+/// most the carrier (no negative frequency) and the wave's limit less the
+/// carrier.
+pub fn fm_dev(s: &Settings, fc: f32) -> f32 {
+    s.fm_dev_hz.min(fc).min(s.wave.max_hz() as f32 - fc).max(0.0)
+}
+
+/// Timing of a modulated output (`Settings::modulated`) and whether the
+/// modulation frequency had to go up: K = carrier / modulation (rounded, at
+/// least 1, at most what keeps MOD_SPC samples per period at the highest
+/// FM frequency), tables of L = K MOD_SPC (peak) ..= N_MAX samples and M =
+/// 200 MHz K / (fc L) (floor / ceil, >= DIV_MIN), the smallest carrier
+/// error, then the largest L within SLACK_PPM of it (as `plan_dac`).
+pub fn mod_plan(s: &Settings) -> (Timing, bool) {
+    let fc = target_hz(s.wave, s.freq_hz);
+    let dev = if s.modu == Mod::Fm { fm_dev(s, fc as f32) } else { 0.0 };
+    let peak = 1.0 + dev / fc as f32;
+    let k_max = ((N_MAX as f32 / (MOD_SPC as f32 * peak)) as u32).max(1);
+    let k_want = ((fc as f32 / s.mod_hz + 0.5) as u32).max(1);
+    let k = k_want.min(k_max);
+    let n_lo = ((k as f32 * MOD_SPC as f32 * peak) as u32 + 1).min(N_MAX as u32);
+    // L at most what keeps M >= DIV_MIN: 200 MHz K / (fc DIV_MIN).
+    let n_hi = ((TIM_CLK_HZ as u64 * k as u64 / (fc as u64 * DIV_MIN as u64)).min(N_MAX as u64) as u32).max(n_lo);
+    let kk = |n: u32| -> Option<Cand> {
+        let m0 = TIM_CLK_HZ as u64 * k as u64 / (fc as u64 * n as u64);
+        let mut best = None;
+        for m in [m0, m0 + 1] {
+            if m >= DIV_MIN as u64 {
+                let (psc, arr) = split(m);
+                keep(&mut best, Cand::new(fc, psc, arr, n, k, Path::Dac));
+            }
+        }
+        best
+    };
+    let mut min: Option<Cand> = None;
+    for n in (n_lo..=n_hi).rev() {
+        if let Some(c) = kk(n) {
+            keep(&mut min, c);
+        }
+    }
+    let Some(min) = min else { return (Cand::new(fc, 0, (DIV_MIN - 1) as u16, n_lo, k, Path::Dac).t, k < k_want) };
+    let mut a = min;
+    for n in (n_lo..=n_hi).rev() {
+        if let Some(c) = kk(n) {
+            let lhs = (c.num as u128) * (min.den as u128) * 1_000_000;
+            let rhs = ((min.num as u128) * 1_000_000 + SLACK_PPM as u128 * fc as u128 * min.den as u128) * c.den as u128;
+            if lhs <= rhs {
+                a = c;
+                break;
+            }
+        }
+    }
+    (a.t, k < k_want)
+}
+
 /// Everything the output will do for `s` (independent of `s.on`).
 pub fn compute(s: &Settings) -> Out {
     let set = s.freq_hz;
     let s = s.normalised();
-    let t = plan(s.wave, s.freq_hz);
+    let modulated = s.modulated();
+    let (t, mod_clamped) = if modulated { mod_plan(&s) } else { (plan(s.wave, s.freq_hz), false) };
     let target = target_hz(s.wave, s.freq_hz);
     let (lo, hi) = levels(&s);
     let duty = match (s.wave, t.path) {
@@ -522,6 +648,7 @@ pub fn compute(s: &Settings) -> Out {
             let ccr = (d * s.duty as u32 + 5000) / 10000;
             ((ccr * 10000 + d / 2) / d) as u16
         }
+        (Wave::Square, Path::Dac) if modulated => s.duty,
         (Wave::Square, Path::Dac) => {
             let n = t.len as u32;
             ((square_high(n, s.duty) * 10000 + n / 2) / n) as u16
@@ -529,7 +656,13 @@ pub fn compute(s: &Settings) -> Out {
         _ => s.duty,
     };
     let (lo_code, hi_code) = if t.path == Path::Pwm { (0, 4095) } else { ((lo + 0.5) as u16, (hi + 0.5) as u16) };
-    Out { timing: t, target_hz: target, freq_clamped: set > s.wave.max_hz(), lo_code, hi_code, duty }
+    let (mod_hz, fm_dev) = if modulated {
+        let fc = t.hz() as f32;
+        (fc / t.cycles as f32, if s.modu == Mod::Fm { fm_dev(&s, fc) } else { 0.0 })
+    } else {
+        (0.0, 0.0)
+    };
+    Out { timing: t, target_hz: target, freq_clamped: set > s.wave.max_hz(), lo_code, hi_code, duty, mod_hz, fm_dev, mod_clamped }
 }
 
 /// PWM compare value for TIM12 CCR1 (PWM mode 1: high while CNT < CCR;
@@ -564,6 +697,10 @@ pub fn sin(x: f32) -> f32 {
 /// round(L duty) samples (K = 1 only), triangle up then down, ramp rising.
 pub fn fill(table: &mut [u16], s: &Settings, t: &Timing) {
     let s = s.normalised();
+    if s.modulated() {
+        fill_mod(table, &s, t);
+        return;
+    }
     let (lo, hi) = levels(&s);
     let l = (t.len as usize).min(table.len()) as u32;
     let k = t.cycles as u32;
@@ -592,6 +729,33 @@ pub fn fill(table: &mut [u16], s: &Settings, t: &Timing) {
             Wave::Ramp => ph,
         };
         *w = (lo + span * shape + 0.5).clamp(0.0, CODE_FS) as u16;
+    }
+}
+
+/// A modulated table (`Settings::modulated`, timing from `mod_plan`): L
+/// samples = one modulation period, sample i at its phase x = i / L and the
+/// carrier's phase (in periods) K x (AM) or K x + beta sin(2 pi x) / (2 pi)
+/// with beta = deviation / modulation frequency (FM). AM: the carrier's
+/// deviation from the centre times (1 + m sin(2 pi x)) / (1 + m), so the
+/// peaks stay within lo..hi.
+fn fill_mod(table: &mut [u16], s: &Settings, t: &Timing) {
+    const TAU: f32 = 2.0 * core::f32::consts::PI;
+    let (lo, hi) = levels(s);
+    let l = (t.len as usize).min(table.len());
+    let k = t.cycles as f32;
+    let fc = t.hz() as f32;
+    let beta = if s.modu == Mod::Fm { fm_dev(s, fc) / (fc / k) } else { 0.0 };
+    let m = s.am_depth as f32 / 100.0;
+    let sh = Shape { wave: s.wave, lo_v: 0.0, hi_v: 1.0, duty: s.duty.min(10000) as f32 / 10000.0 };
+    for (i, w) in table[..l].iter_mut().enumerate() {
+        let x = i as f32 / l as f32;
+        let sx = sin(TAU * x);
+        let (ph, env) = match s.modu {
+            Mod::Fm => (k * x + beta * sx / TAU, 1.0),
+            _ => (k * x, (1.0 + m * sx) / (1.0 + m)),
+        };
+        let u = 0.5 + (sh.unit(ph) - 0.5) * env;
+        *w = (lo + (hi - lo) * u + 0.5).clamp(0.0, CODE_FS) as u16;
     }
 }
 

@@ -1090,15 +1090,16 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
 }
 
 /// The generator page's square preview (ui::gen_preview: x 4..243, high
-/// level at row 143, low at 258) is high in `duty` of its columns.
+/// level at row 131, low at 223: the 185-row preview over the Mod box) is
+/// high in `duty` of its columns.
 fn gen_duty_check(ck: &mut Checker, duty: u16) {
     const TRACE: u16 = 0x04A9;
     let fb = &host::emu().fb;
     let at = |x: usize, y: usize| fb[y * W + x] == TRACE;
     let (mut hi, mut lo) = (0, 0);
     for x in 5..242 {
-        hi += at(x, 143) as usize;
-        lo += at(x, 258) as usize;
+        hi += at(x, 131) as usize;
+        lo += at(x, 223) as usize;
     }
     let share = hi as f32 / (hi + lo).max(1) as f32;
     ck.cases += 1;
@@ -2387,7 +2388,7 @@ fn main() {
         (gen::Wave::Sine, 1, 0.5, None, 5000, true),
     ];
     for (k, (wave, f, amp, offs, duty, on)) in gcases.iter().enumerate() {
-        let g = gen::Settings { on: *on, wave: *wave, freq_hz: *f, amp_v: *amp, duty: *duty, offset_v: *offs };
+        let g = gen::Settings { on: *on, wave: *wave, freq_hz: *f, amp_v: *amp, duty: *duty, offset_v: *offs, ..gen::Settings::DEFAULT };
         w.gen.apply(g);
         host::reset(0);
         ui::gen_static(&w.gen);
@@ -2413,6 +2414,27 @@ fn main() {
             ui::keypad_key(ui::KP_NUM, b'5', true);
             save(&out, "g04-keypad-vpp-sel");
         }
+    }
+    // 6a'. Modulation (owner 2026-11-21): the Mod box (AM raised to fit the
+    //      table, FM with a limited deviation, n/a on the PWM square, the
+    //      widest texts) and the modulation page.
+    let mods: [(gen::Wave, u32, gen::Mod, f32, u8, f32); 4] = [
+        (gen::Wave::Sine, 10_000, gen::Mod::Am, 10.0, 100, 0.0),
+        (gen::Wave::Sine, 45_000, gen::Mod::Fm, 1000.0, 50, 20_000.0),
+        (gen::Wave::Square, 2_000_000, gen::Mod::Fm, 100.0, 50, 1000.0),
+        (gen::Wave::Triangle, 33_333, gen::Mod::Fm, 12_345.6, 50, 16_666.0),
+    ];
+    for (k, (wave, f, md, fm, depth, dev)) in mods.iter().enumerate() {
+        let g = gen::Settings { on: true, wave: *wave, freq_hz: *f, modu: *md, mod_hz: *fm, am_depth: *depth, fm_dev_hz: *dev, ..gen::Settings::DEFAULT };
+        w.gen.apply(g);
+        host::reset(0);
+        ui::gen_static(&w.gen);
+        ck.check_opts(&format!("gen-mod/{k}"), &gen_regions, false);
+        save(&out, &format!("g06-gen-mod{k}"));
+        host::reset(0);
+        ui::gen_mod_page(&w.gen);
+        ck.check_opts(&format!("gen-mod-page/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))], false);
+        save(&out, &format!("g07-gen-mod-page{k}"));
     }
     w.gen.apply(gen::Settings::DEFAULT);
     for title in ["Hold & Limits: Temperature", "Settings", "Hold & Limits: Capacitance"] {

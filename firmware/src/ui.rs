@@ -109,6 +109,8 @@ pub enum View {
     Range,
     /// Generator value entry (frequency / Vpp / duty).
     Keypad,
+    /// The generator's modulation page (its Mod box; `gen_mod_page`).
+    GenMod,
     /// Device / About page (stock gui_v2_6.h section 6 "6.产品信息").
     Device,
     /// DMM AutoHold and Hi/Lo limits of the current function (MF).
@@ -2793,6 +2795,73 @@ pub const GEN_BOX_Y: [i16; 4] = [40, 110, 180, 250];
 const GEN_BOX_H: i16 = 66;
 const GEN_NAMES: [&str; 4] = ["Frequency", "Vpp", "Offset", "Duty"];
 
+/// The preview's rows (85..), and under it the modulation box (GEN_MOD_BOX;
+/// a tap opens View::GenMod).
+const GEN_PREV_H: u16 = 185;
+pub const GEN_MOD_BOX: sf::Rect = rect(4, 274, 239, 42);
+
+/// The Mod box under a tap.
+pub fn gen_mod_hit(x: u16, y: u16) -> bool {
+    x < 243 && (272..318).contains(&y)
+}
+
+/// The Mod box: "Mod: Off", "AM 100.00Hz 50%", "FM 100.00Hz 2000Hz" (the
+/// actual modulation frequency; orange when the table raised it, grey with
+/// "n/a" on the PWM square).
+fn gen_mod_box(g: &gen::Gen, bg: Color) {
+    let s = &g.s;
+    let mut b = [0u8; 24];
+    let mut t1 = [0u8; 16];
+    let mut t2 = [0u8; 16];
+    let (txt, fg) = if s.modu == gen::Mod::Off {
+        ("Mod: Off", STATUS_FG)
+    } else if !s.modulated() {
+        (join(&mut b, &[s.modu.name(), " n/a above 50k"]), G_DIM)
+    } else {
+        let f = g.out.mod_hz;
+        let fs = crate::dmm::format(&mut t1, f, if f < 10.0 { 3 } else if f < 1000.0 { 2 } else { 1 });
+        let (v, u) = if s.modu == gen::Mod::Am {
+            (crate::dmm::format(&mut t2, s.am_depth as f32, 0), "%")
+        } else {
+            (crate::dmm::format(&mut t2, g.out.fm_dev, 0), "Hz")
+        };
+        (join(&mut b, &[s.modu.name(), " ", fs, "Hz ", v, u]), if g.out.mod_clamped { VALUE } else { STATUS_FG })
+    };
+    sf::rbox(GEN_MOD_BOX, 3, bg, G_BG);
+    sf::glyphs(sf::TEXT22, rect(GEN_MOD_BOX.x + 8, GEN_MOD_BOX.y, GEN_MOD_BOX.w - 12, GEN_MOD_BOX.h), txt, fg, bg, 1, 0);
+}
+
+/// Rows of the modulation page (View::GenMod).
+pub const MOD_ROWS: [&str; 4] = ["Modulation", "Mod frequency", "AM depth", "FM deviation"];
+
+/// The modulation page: mode (a tap steps Off / AM / FM), the modulation
+/// frequency (set, and the actual one when the table raised it), the AM
+/// depth, the FM deviation (the one used, when limited).
+#[inline(never)] // .cold (link-native.x): drawn on a tap
+pub fn gen_mod_page(g: &gen::Gen) {
+    let s = &g.s;
+    let o = &g.out;
+    let mut bm = [0u8; 24];
+    let mode = if s.modu != gen::Mod::Off && !s.modulated() { join(&mut bm, &[s.modu.name(), ": not above 50 kHz"]) } else { s.modu.name() };
+    let (mut n1, mut n2, mut bf) = ([0u8; 16], [0u8; 16], [0u8; 24]);
+    let fset = crate::dmm::format(&mut n1, s.mod_hz, if s.mod_hz < 10.0 { 3 } else { 2 });
+    let freq = if o.mod_clamped {
+        join(&mut bf, &[fset, " Hz (", crate::dmm::format(&mut n2, o.mod_hz, 2), ")"])
+    } else {
+        join(&mut bf, &[fset, " Hz"])
+    };
+    let (mut n3, mut bd) = ([0u8; 16], [0u8; 24]);
+    let depth = join(&mut bd, &[crate::dmm::format(&mut n3, s.am_depth as f32, 0), " %"]);
+    let (mut n4, mut n5, mut bv) = ([0u8; 16], [0u8; 16], [0u8; 24]);
+    let dv = crate::dmm::format(&mut n4, s.fm_dev_hz, 0);
+    let dev = if s.modulated() && s.modu == gen::Mod::Fm && (o.fm_dev - s.fm_dev_hz).abs() >= 0.5 {
+        join(&mut bv, &[dv, " Hz (", crate::dmm::format(&mut n5, o.fm_dev, 0), ")"])
+    } else {
+        join(&mut bv, &[dv, " Hz"])
+    };
+    list_page("Modulation", &MOD_ROWS, &[mode, freq, depth, dev]);
+}
+
 /// The wave drop-down box (4, 40, 239, 42) under a tap.
 pub fn gen_wave_hit(x: u16, y: u16) -> bool {
     x < 243 && (40..82).contains(&y)
@@ -2831,6 +2900,10 @@ fn gen_box_note(k: usize, note: &str, fg: Color, bg: Color) {
 /// keypads' pressed colour; ui-review #11: feedback from touch-down).
 pub fn gen_press(g: &gen::Gen, k: usize, pressed: bool) {
     let bg = if pressed { K_SEL } else { G_BOX };
+    if k == 5 {
+        gen_mod_box(g, bg);
+        return;
+    }
     if k >= 4 {
         gen_wave_box(g.s.wave, bg);
         return;
@@ -2841,7 +2914,13 @@ pub fn gen_press(g: &gen::Gen, k: usize, pressed: bool) {
 
 /// The box `gen_press` draws for `k` (the press feedback's strip box).
 pub fn gen_press_rect(k: usize) -> sf::Rect {
-    if k >= 4 { rect(4, 40, 239, 42) } else { rect(246, GEN_BOX_Y[k.min(3)], 230, GEN_BOX_H) }
+    if k == 5 {
+        GEN_MOD_BOX
+    } else if k >= 4 {
+        rect(4, 40, 239, 42)
+    } else {
+        rect(246, GEN_BOX_Y[k.min(3)], 230, GEN_BOX_H)
+    }
 }
 
 /// Box `k`'s fill and name.
@@ -2905,8 +2984,9 @@ pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 // Region B (not inlined into the region C callers): drawn per strip.
 #[inline(never)]
 fn gen_preview(w: gen::Wave, duty: u16) {
-    // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
-    let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);
+    // Two periods over 238 points between h/4 and 3h/4, as the stock preview
+    // (shorter than the stock's 231 rows: the Mod box under it).
+    let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, GEN_PREV_H);
     let sel = match w {
         gen::Wave::Sine => 0,
         gen::Wave::Ramp => 1,
@@ -3010,6 +3090,7 @@ pub fn gen_values(g: &gen::Gen) {
     sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
     gen_wave_box(s.wave, G_BOX);
     gen_preview(s.wave, g.out.duty);
+    gen_mod_box(g, G_BOX);
     for k in 0..4 {
         gen_box(g, k, G_BOX);
     }
@@ -3394,7 +3475,7 @@ pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
         View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
         View::Settings if t.part == 0 => st_row(row),
         View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
-        View::Limits => set_row(row),
+        View::Limits | View::GenMod => set_row(row),
         View::Record if t.part == 0 => set_row(row),
         View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
         _ => return None,
@@ -3780,6 +3861,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Settings => "Settings",
         View::Range => "Range",
         View::Keypad => "Keypad",
+        View::GenMod => "Modulation",
         View::Device => "Device",
         View::Limits => "Hold & Limits",
         View::Record => "Record",

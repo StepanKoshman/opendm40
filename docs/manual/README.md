@@ -1887,7 +1887,8 @@ an external voltage can destroy the output.
 
 - Top bar: **RUN** (green, output on) or **STOP**, the time since power-on,
   lock, Bluetooth, battery.
-- Left: the waveform box with a preview of two periods.
+- Left: the waveform box with a preview of two periods, under it the
+  [modulation](#modulation) box.
 - Right: **Frequency**, **Vpp**, **Offset**, **Duty**.
 
 To use it:
@@ -1951,6 +1952,44 @@ set as on the stock firmware: square, 2 MHz, 3 Vpp.
 
 *Offset auto, a set offset, a DC output.*
 
+### Modulation
+
+The box under the preview shows the modulation: **Mod: Off**, or for
+example **AM 100.00Hz 50%** / **FM 1000.00Hz 5000Hz**. Tap it to open the
+**Modulation** page:
+
+| Row | What it does |
+|---|---|
+| **Modulation** | Tap to step **Off → AM → FM**. |
+| **Mod frequency** | The modulating sine, Hz (0.1 .. 25000). |
+| **AM depth** | 0 .. 100 %. At 100 % the envelope goes down to the centre level. |
+| **FM deviation** | Peak deviation from the carrier, Hz. |
+
+**< Back** or **MENU** return to the generator page; **RUN** switches the
+output on or off here too.
+
+- The carrier is the waveform and frequency of the generator page (sine,
+  square, triangle or ramp, up to 50 kHz). A square above 50 kHz runs on the
+  logic-level path and cannot be modulated: the box shows **n/a above 50k**.
+- AM keeps the peaks within the set Vpp and offset: at 50 % the carrier
+  swings between a third of the Vpp and the full Vpp.
+- FM: the deviation is limited to the carrier frequency and to what keeps
+  carrier + deviation within 50 kHz; the page then shows the deviation used
+  in brackets, for example **8000 Hz (5000)**.
+- The output plays one modulation period from its table, which holds a
+  whole number of carrier periods, at most 100 (20 samples per carrier
+  period). So the modulation frequency is the carrier divided by a whole
+  number, and at least carrier / 100: 10 kHz modulated at 10 Hz runs at
+  100 Hz. The box then shows the real modulation frequency in orange and
+  the page shows it in brackets.
+- The scope's GEN channel shows nothing while the output is modulated
+  (connect OUT to CH1 to see it).
+- Kept over a power-off.
+
+| ![AM: 10 kHz sine, 100 Hz, 50 %](img/gen-am.png) | ![The Modulation page, FM with the deviation limited](img/gen-mod.png) |
+|---|---|
+| AM: 10 kHz sine, 100 Hz, 50 % | The Modulation page: FM at 45 kHz, the deviation limited to 5 kHz |
+
 ### The keypad
 
 Tap a value box. The keypad opens with the current value selected:
@@ -1959,7 +1998,7 @@ Tap a value box. The keypad opens with the current value selected:
   after that **<** deletes the last character;
 - frequency: type whole numbers and choose the unit with **H** (Hz),
   **K** (kHz) or **M** (MHz). To get 32.768 kHz, type `32768` and **H**;
-- Vpp, offset and duty: digits and a decimal point;
+- Vpp, offset, duty and the modulation values: digits and a decimal point;
 - **OK** applies; a tap outside the keypad cancels.
 
 

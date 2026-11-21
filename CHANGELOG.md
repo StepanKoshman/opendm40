@@ -13,6 +13,12 @@ official opendm40 release.
 
 ### Added
 
+- **Generator: AM and FM** (owner). The box under the preview opens the
+  Modulation page: Off / AM / FM, the modulating sine's frequency, AM depth,
+  FM deviation; SCPI `SOUR:AM:*`, `SOUR:FM:*`. The table holds one
+  modulation period with a whole number of carrier periods (at most 100),
+  so the output still runs from DMA alone; the modulation frequency is the
+  carrier / a whole number. Kept over a power-off.
 - **DMM: 60 nS conductance range** (owner). Ω range page, bottom row
   **60nS**: G = 1/R on the 600 MΩ source and phases, 60.00 nS (16.7 MΩ)
   down to 0.01 nS (100 GΩ). The jacks' leakage only adds to it, so REL on
@@ -39,7 +45,8 @@ official opendm40 release.
 Кратко: страница проверки сенсора (Settings > Other > Touch test) и справка
 на экране (Settings > Other > Help) удалены, чтобы освободить память. На токе (DC A, mA, µA)
 появился шестой разряд, как на вольтметре. Новый диапазон проводимости 60 nS
-(страница диапазонов Ω) для сопротивлений до 100 ГОм.
+(страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
+(поле под предпросмотром).
 
 ## v0.4.25-S2084 (2026-11-20)
 

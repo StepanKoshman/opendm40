@@ -55,9 +55,15 @@ const V11_WORDS: usize = 70;
 /// The scope's zero calibration (3 words; a preference).
 pub const W_SCOPE_ZERO: usize = 70;
 const V10_WORDS: usize = 64;
-/// The removed touch calibration's 6 words: reserved, written 0.
+/// The removed touch calibration's 6 words (64..70), written 0 since
+/// 0.4.25. Since 0.4.26 the first three hold the generator's modulation
+/// (W_GEN_MOD: p[64] = GEN_MOD_TAG << 24 | mode | AM depth << 8, p[65] the
+/// modulation frequency, p[66] the FM deviation, f32 bits); without the tag
+/// (zeros, or an old calibration) the modulation stays off.
 #[allow(dead_code)]
 pub const W_TOUCH_CAL: usize = 64;
+pub const W_GEN_MOD: usize = 64;
+pub const GEN_MOD_TAG: u32 = 0xA5;
 const V9_WORDS: usize = 62;
 /// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
 pub const W_LIM_W: usize = 62;

@@ -916,6 +916,10 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   SOURce:VOLTage <Vpp>   SOURce:VOLTage:OFFSet <V>|AUTO (FR-28: centre level;
 ///   AUTO = stock 0..Vpp; kept in [Vpp/2, 3 - Vpp/2])
 ///   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
+///   SOURce:AM:STATe ON|OFF   SOURce:FM:STATe ON|OFF (one at a time; ON
+///   switches the other off)   SOURce:AM:DEPTh <%>   SOURce:FM:DEViation <Hz>
+///   SOURce:AM|FM:INTernal:FREQuency <Hz> (one modulation frequency; its
+///   query: the actual one, carrier / K)
 ///   Queries: FREQ? = the actual (clamped + quantised) frequency, DCYC? the
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
@@ -953,6 +957,12 @@ pub enum Cmd {
     GenOffs(Option<f32>),
     GenDuty(Option<f32>),
     GenOut(Option<bool>),
+    /// SOUR:AM:STAT / SOUR:FM:STAT (1 AM, 2 FM = gen::Mod::ALL index).
+    GenModState(u8, Option<bool>),
+    /// SOUR:AM|FM:INT:FREQ, SOUR:AM:DEPT, SOUR:FM:DEV.
+    GenModFreq(Option<f32>),
+    GenAmDepth(Option<f32>),
+    GenFmDev(Option<f32>),
     TimScale(Option<f32>),
     ChScale(Option<f32>),
     ChCoup(Option<bool>),
@@ -1615,6 +1625,27 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
             (true, _) => Ok(Cmd::GenOut(None)),
             (false, Some(b)) => Ok(Cmd::GenOut(Some(b))),
             _ => Err(BAD),
+        };
+    }
+    if kw(p0, "SOURce") && (kw(sub, "AM") || kw(sub, "FM")) {
+        // SOUR:AM|FM:STATe / :DEPTh (AM) / :DEViation (FM) /
+        // :INTernal:FREQuency (the generator's modulation, gen::Mod).
+        let am = kw(sub, "AM");
+        let p2 = parts.get(2).copied().unwrap_or(&[]);
+        return if kw(p2, "STATe") {
+            match (query, on_off(a)) {
+                (true, _) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, None)),
+                (false, Some(b)) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, Some(b))),
+                _ => Err(BAD),
+            }
+        } else if am && kw(p2, "DEPTh") {
+            Ok(Cmd::GenAmDepth(num(b"PCT", |v| (0.0..=100.0).contains(&v))?))
+        } else if !am && kw(p2, "DEViation") {
+            Ok(Cmd::GenFmDev(num(b"HZ", |v| v >= 0.0)?))
+        } else if kw(p2, "INTernal") && parts.len() >= 4 && kw(parts[3], "FREQuency") {
+            Ok(Cmd::GenModFreq(num(b"HZ", pos)?))
+        } else {
+            Err("Undefined header")
         };
     }
     if kw(p0, "SOURce") {

@@ -423,7 +423,7 @@ pub fn run(out: &str) -> usize {
 
     // Generator: every waveform, the 50 kHz clamp, a DC output, the keypad.
     {
-        let g = |on, wave, freq_hz, amp_v, duty, offset_v| gen::Settings { on, wave, freq_hz, amp_v, duty, offset_v };
+        let g = |on, wave, freq_hz, amp_v, duty, offset_v| gen::Settings { on, wave, freq_hz, amp_v, duty, offset_v, ..gen::Settings::DEFAULT };
         let gen_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 36))];
         for (name, s, kp) in [
             ("gen-square", g(true, gen::Wave::Square, 1_000, 3.0, 2500, None), None),
@@ -441,6 +441,18 @@ pub fn run(out: &str) -> usize {
             }
             save1(out, name);
         }
+        // Modulation (owner 2026-11-21): AM on the page, the modulation page
+        // with FM (its deviation limited at a 45 kHz carrier).
+        let am = gen::Settings { modu: gen::Mod::Am, mod_hz: 100.0, am_depth: 50, ..g(true, gen::Wave::Sine, 10_000, 3.0, 5000, None) };
+        gen_page(am, None);
+        ck.check_opts("manual/gen-am", &gen_regions, false);
+        save1(out, "gen-am");
+        let mut gg = gen::Gen::new();
+        gg.apply(gen::Settings { modu: gen::Mod::Fm, mod_hz: 1000.0, fm_dev_hz: 8000.0, ..g(true, gen::Wave::Sine, 45_000, 3.0, 5000, None) });
+        host::reset(0);
+        ui::gen_mod_page(&gg);
+        ck.check_opts("manual/gen-mod", &page, false);
+        save1(out, "gen-mod");
     }
 
     // Wave view: mains on the 600 V range (its full-scale step, 150 V/div), triggered at 10 V,

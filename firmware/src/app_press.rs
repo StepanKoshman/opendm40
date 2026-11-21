@@ -31,7 +31,7 @@ impl App {
     #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
         if self.pressed.is_some()
-            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range)
+            || (matches!(self.view, View::Menu | View::Gen | View::GenMod | View::Settings | View::Limits | View::Record | View::Range)
                 && !crate::hy3131::streaming())
         {
             self.press_track(g);
@@ -65,6 +65,9 @@ impl App {
         match self.view {
             View::Menu => r(ui::main_menu_hit(x, y)?, 0),
             View::Gen if ui::gen_wave_hit(x, y) => r(4, 0),
+            View::Gen if ui::gen_mod_hit(x, y) => r(5, 0),
+            View::GenMod if ui::title_back_hit(y) => None,
+            View::GenMod => r(ui::list_hit(y, ui::MOD_ROWS.len())?, 0),
             View::Gen => match ui::gen_box_hit(x, y)? {
                 3 if self.gen.s.wave != Wave::Square => None,
                 k => r(k, 0),

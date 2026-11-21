@@ -165,6 +165,7 @@ fn is_page(v: View) -> bool {
             | View::Gallery
             | View::Inrush
             | View::Decode
+            | View::GenMod
     )
 }
 
@@ -173,6 +174,11 @@ fn is_page(v: View) -> bool {
 const KP_T_OFFS: u8 = 6;
 const KP_NTC_R25: u8 = 7;
 const KP_NTC_BETA: u8 = 8;
+/// The generator's modulation page (View::GenMod): modulation frequency,
+/// AM depth, FM deviation.
+const KP_MOD_F: u8 = 9;
+const KP_AM_D: u8 = 10;
+const KP_FM_DEV: u8 = 11;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
 // The Record page's interval list: csvlog's indices, then "Fast".
@@ -892,7 +898,7 @@ impl App {
             View::Inrush => (true, false),
             // The decoder's frame log: the scope input; the DMM as it was.
             View::Decode => (self.scope.dmm_rail(), true),
-            View::Scope | View::Gen | View::Keypad => (false, true),
+            View::Scope | View::Gen | View::GenMod | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
@@ -954,11 +960,14 @@ impl App {
             }
             View::Scope => self.sp_draw_static(),
             View::Gen => ui::gen_static(&self.gen),
+            View::GenMod => ui::gen_mod_page(&self.gen),
             View::Keypad => {
                 if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
                 } else if self.kp_dmm() {
                     self.with_temp_page(None);
+                } else if self.kp_back() == View::GenMod {
+                    ui::gen_mod_page(&self.gen);
                 } else {
                     ui::gen_static(&self.gen);
                 }
@@ -1529,7 +1538,7 @@ impl App {
     fn kp_kind(&self) -> u8 {
         match self.kp_target {
             0 => ui::KP_FREQ,
-            1 | 2 | 5 | KP_NTC_R25 | KP_NTC_BETA => ui::KP_NUM,
+            1 | 2 | 5 | KP_NTC_R25 | KP_NTC_BETA | KP_MOD_F | KP_AM_D | KP_FM_DEV => ui::KP_NUM,
             _ => ui::KP_SIGNED,
         }
     }
@@ -1567,6 +1576,7 @@ impl App {
         match self.kp_target {
             3 | 4 => View::Limits,
             KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA => View::Range,
+            KP_MOD_F | KP_AM_D | KP_FM_DEV => View::GenMod,
             _ => View::Gen,
         }
     }
@@ -1950,7 +1960,7 @@ impl App {
                     }
                 }
                 View::Gen => ui::gen_status(&st),
-                View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
+                View::Keypad if !self.kp_dmm() && self.kp_back() == View::Gen => ui::gen_status(&st),
                 View::DmmScope => self.draw_reading(),
                 View::Range if self.temp_page_on() => self.temp_info_tick(false),
                 _ => {}
@@ -1964,7 +1974,7 @@ impl App {
             match self.view {
                 View::Dmm => ui::status_rec_blink(&st, false),
                 View::Gen => ui::status_rec_blink(&st, true),
-                View::Keypad if !self.kp_dmm() => ui::status_rec_blink(&st, true),
+                View::Keypad if !self.kp_dmm() && self.kp_back() == View::Gen => ui::status_rec_blink(&st, true),
                 _ => {}
             }
         }
@@ -2157,6 +2167,9 @@ impl App {
             KP_T_OFFS => crate::dmm::format(&mut t, self.dmm.t_offs(self.dmm.t_sensor()), 1),
             KP_NTC_R25 => trim_zeros(crate::dmm::format(&mut t, self.dmm.ntc_user().0 / 1000.0, 3)),
             KP_NTC_BETA => crate::dmm::format(&mut t, self.dmm.ntc_user().1, 0),
+            KP_MOD_F => trim_zeros(crate::dmm::format(&mut t, s.mod_hz, 2)),
+            KP_AM_D => crate::dmm::format(&mut t, s.am_depth as f32, 0),
+            KP_FM_DEV => crate::dmm::format(&mut t, s.fm_dev_hz, 0),
             _ => "",
         };
         let n = pre.len().min(self.kp_buf.len() - 1);
@@ -2180,6 +2193,9 @@ impl App {
             KP_T_OFFS => ("Offset", "\u{2103}"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
+            KP_MOD_F => ("Mod freq", "Hz"),
+            KP_AM_D => ("AM depth", "%"),
+            KP_FM_DEV => ("FM dev", "Hz"),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
             _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
@@ -2245,6 +2261,9 @@ impl App {
             }
             1 => st = st.with_amp(v),
             5 => st = st.with_offset(Some(v)),
+            KP_MOD_F => st.mod_hz = v,
+            KP_AM_D => st.am_depth = v.clamp(0.0, 100.0) as u8,
+            KP_FM_DEV => st.fm_dev_hz = v.max(0.0),
             _ => st.duty = (v.clamp(0.0, 100.0) * 100.0) as u16,
         }
         self.gen.apply(st);
@@ -2357,7 +2376,14 @@ impl App {
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4 | (swap01(crate::csvlog::change()) as u32) << 8;
-        // (p[64..70], the touch calibration's words of v11: zero, unused)
+        // p[64..67]: the generator's modulation (persist::W_GEN_MOD; the rest
+        // of the old touch calibration's words zero).
+        let w = crate::persist::W_GEN_MOD;
+        p[w] = crate::persist::GEN_MOD_TAG << 24
+            | gen::Mod::ALL.iter().position(|&m| m == g.modu).unwrap_or(0) as u32
+            | (g.am_depth as u32) << 8;
+        p[w + 1] = g.mod_hz.to_bits();
+        p[w + 2] = g.fm_dev_hz.to_bits();
         // v12: the scope's zero calibration (scope.rs ZTRIM; 0 = none).
         for (i, t) in scope::zero_trim().iter().enumerate() {
             p[crate::persist::W_SCOPE_ZERO + i / 4] |= (*t as u8 as u32) << (8 * (i % 4));
@@ -2506,8 +2532,16 @@ impl App {
         g.amp_v = if a.is_finite() { a.clamp(gen::AMP_MIN, gen::AMP_MAX) } else { 3.0 };
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
+        // p[64..67]: the modulation, with its tag (older records: zeros or
+        // the gone touch calibration, modulation off).
+        let w = crate::persist::W_GEN_MOD;
+        if p[w] >> 24 == crate::persist::GEN_MOD_TAG {
+            g.modu = gen::Mod::ALL[((p[w] & 3) as usize).min(2)];
+            g.am_depth = (p[w] >> 8) as u8;
+            g.mod_hz = f32::from_bits(p[w + 1]);
+            g.fm_dev_hz = f32::from_bits(p[w + 2]);
+        }
         self.gen.s = g.normalised();
-        // (p[64..70]: the touch calibration of v11 / v12, gone: ignored)
         // v12: the scope's zero calibration, a preference (0 = none).
         let mut zt = [0i8; 10];
         for (i, t) in zt.iter_mut().enumerate() {
@@ -3018,6 +3052,8 @@ impl App {
         self.gen.apply(s);
         if self.view == View::Gen {
             ui::gen_values(&self.gen);
+        } else if self.view == View::GenMod {
+            self.redraw = true;
         }
     }
 
@@ -3693,6 +3729,7 @@ impl App {
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
+                    View::GenMod => View::Gen,
                     View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
                 };
@@ -3701,7 +3738,7 @@ impl App {
             1 => match self.view {
                 // The inrush page: RUN = Arm / Cancel.
                 View::Inrush => self.inrush_button(clk),
-                View::Gen => {
+                View::Gen | View::GenMod => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
                     self.gen_set(st);
@@ -3722,7 +3759,7 @@ impl App {
             // The generator's Signal page (and its keypad) has no AUTO
             // function: the key does nothing there (it used to set the
             // DMM's autorange).
-            2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
+            2 if matches!(self.view, View::Gen | View::GenMod) || (self.view == View::Keypad && !self.kp_dmm()) => {}
             // V / A / ohm: the range step on release, the autorange when held
             // (auto_key_end).
             2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
@@ -3888,7 +3925,8 @@ impl App {
                         let digits = self.kp_buf[..self.kp_n].iter().filter(|d| d.is_ascii_digit()).count();
                         let ok = match self.kp_target {
                             0 => self.kp_n < 7,
-                            1 | 2 | 5 | KP_NTC_BETA => self.kp_n < 5,
+                            1 | 2 | 5 | KP_NTC_BETA | KP_AM_D => self.kp_n < 5,
+                            KP_MOD_F | KP_FM_DEV => self.kp_n < 8,
                             KP_T_OFFS => self.kp_n < 5,
                             KP_NTC_R25 => self.kp_n < 7,
                             _ => c == b'.' || digits < 5,
@@ -4066,6 +4104,9 @@ impl App {
                 } else if ui::gen_wave_hit(x, y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
+                } else if ui::gen_mod_hit(x, y) {
+                    self.show(View::GenMod, clk);
+                    return;
                 } else if let Some(b) = ui::gen_box_hit(x, y) {
                     // Frequency, Vpp, Offset, Duty (square only, any f).
                     match b {
@@ -4083,6 +4124,24 @@ impl App {
                 // cannot play it runs at its limit, gen::Gen::freq_clamped),
                 // so cycling back to Square restores it.
                 self.gen_set(st);
+            }
+            View::GenMod => {
+                if ui::title_back_hit(y) {
+                    self.show(View::Gen, clk);
+                    return;
+                }
+                match ui::list_hit(y, ui::MOD_ROWS.len()) {
+                    Some(0) => {
+                        let mut st = self.gen.s;
+                        let k = gen::Mod::ALL.iter().position(|&m| m == st.modu).unwrap_or(0);
+                        st.modu = gen::Mod::ALL[(k + 1) % 3];
+                        self.gen_set(st);
+                    }
+                    Some(1) => self.kp_open(KP_MOD_F, clk),
+                    Some(2) => self.kp_open(KP_AM_D, clk),
+                    Some(3) => self.kp_open(KP_FM_DEV, clk),
+                    _ => {}
+                }
             }
             View::Menu => match ui::main_menu_hit(x, y) {
                 Some(0) => self.show(View::Dmm, clk),
@@ -5365,7 +5424,21 @@ impl App {
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd =
-            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenOffs(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
+            !matches!(
+                cmd,
+                C::GenFunc(_)
+                    | C::GenFreq(_)
+                    | C::GenVolt(_)
+                    | C::GenOffs(_)
+                    | C::GenDuty(_)
+                    | C::GenOut(_)
+                    | C::GenModState(..)
+                    | C::GenModFreq(_)
+                    | C::GenAmDepth(_)
+                    | C::GenFmDev(_)
+                    | C::DiagDac
+                    | C::DiagPwm
+            );
         if self.scope.wave_on() && matches!(cmd, C::ChScale(Some(_)) | C::ChCoup(Some(_)) | C::DbgHwTrig(..)) {
             // MCX-only settings (front-end range, coupling, comparator):
             // leave the wave view. Timebase, trigger, RUN / STOP and the
@@ -5435,6 +5508,49 @@ impl App {
             }
             C::GenOut(None) => {
                 out.put_bytes(if g.on { b"1" } else { b"0" });
+                Some(())
+            }
+            // Modulation (gen::Mod): one of AM / FM at a time.
+            C::GenModState(k, Some(on)) => {
+                let m = gen::Mod::ALL[k as usize % 3];
+                if on {
+                    g.modu = m;
+                } else if g.modu == m {
+                    g.modu = gen::Mod::Off;
+                }
+                None
+            }
+            C::GenModState(k, None) => {
+                out.put_bytes(if g.modu == gen::Mod::ALL[k as usize % 3] { b"1" } else { b"0" });
+                Some(())
+            }
+            C::GenModFreq(Some(f)) => {
+                g.mod_hz = f;
+                None
+            }
+            C::GenModFreq(None) => {
+                // The actual one while modulated (carrier / K), else the set.
+                let o = &self.gen.out;
+                out.put_f32(if o.mod_hz > 0.0 { o.mod_hz } else { g.mod_hz });
+                Some(())
+            }
+            C::GenAmDepth(Some(d)) => {
+                g.am_depth = d.clamp(0.0, 100.0) as u8;
+                None
+            }
+            C::GenAmDepth(None) => {
+                out.put_f32(g.am_depth as f32);
+                Some(())
+            }
+            C::GenFmDev(Some(d)) => {
+                g.fm_dev_hz = d;
+                None
+            }
+            C::GenFmDev(None) => {
+                // The deviation used while FM runs (limited around the
+                // carrier), else the set one.
+                let o = &self.gen.out;
+                out.put_f32(if o.fm_dev > 0.0 { o.fm_dev } else { g.fm_dev_hz });
                 Some(())
             }
             C::TimScale(Some(t)) => {
