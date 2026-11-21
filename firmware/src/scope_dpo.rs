@@ -47,14 +47,19 @@ const LEVEL: [u8; 15] = [1, 2, 3, 4, 5, 7, 10, 14, 21, 30, 44, 64, 93, 136, 200]
 pub const DECAY_MS: [u32; 5] = [300, 1000, 3000, 10_000, 0];
 pub const DECAY_NAMES: [&str; 5] = ["0.3s", "1s", "3s", "10s", "INF"];
 
-#[inline]
+#[inline(always)]
 fn level(c: u8) -> u8 {
-    LEVEL.iter().filter(|&&t| c >= t).count() as u8
+    // (a plain loop: the iterator chain stays calls at opt-level "z")
+    let mut n = 0;
+    while n < 15 && c >= LEVEL[n] {
+        n += 1;
+    }
+    n as u8
 }
 
 /// A count for level `l` (`Dpo::rng` the random part): 0 for none, 255 for
 /// the top, else uniform in LEVEL[l - 1] .. LEVEL[l].
-#[inline]
+#[inline(always)]
 fn count_in(l: u8, rng: &mut u32) -> u8 {
     match l {
         0 => 0,

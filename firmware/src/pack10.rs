@@ -85,35 +85,45 @@ pub fn get(base: *const u8, i: usize) -> u16 {
 }
 
 /// Min / max / sum of the packed codes j .. j + n at `base` (no wrap) into
-/// `acc`: single codes up to a group boundary, then whole groups.
+/// `acc`: single codes up to a group boundary, then whole groups. No
+/// closure: at opt-level "z" one stayed a call per code (device profile
+/// 244982b: 6.5 ms for a 200 us/div frame, slower than the per-code `at`).
 #[inline(always)]
 fn scan_run(base: *const u8, mut j: usize, n: usize, acc: &mut (u16, u16, u32)) {
     let end = j + n;
-    let mut put = |v: u16| {
-        acc.0 = acc.0.min(v);
-        acc.1 = acc.1.max(v);
-        acc.2 += v as u32;
-    };
+    let (mut lo, mut hi, mut s) = *acc;
+    macro_rules! put {
+        ($v:expr) => {{
+            let v: u16 = $v;
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
+            s += v as u32;
+        }};
+    }
     while j < end && j & 3 != 0 {
-        put(get(base, j));
+        put!(get(base, j));
         j += 1;
     }
+    // SAFETY: group g's 5 bytes are in the buffer (+ 3 of slack).
+    let mut p = unsafe { base.add(j / 4 * 5) };
     while j + 4 <= end {
-        // SAFETY: group j / 4's 5 bytes are in the buffer (+ 3 of slack).
-        let (w, h) = unsafe {
-            let p = base.add(j / 4 * 5);
-            (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32)
-        };
-        put((w & 0x3FF) as u16);
-        put((w >> 10 & 0x3FF) as u16);
-        put((w >> 20 & 0x3FF) as u16);
-        put((w >> 30 | h << 2) as u16);
+        let (w, h) = unsafe { (core::ptr::read_unaligned(p as *const u32), *p.add(4) as u32) };
+        put!((w & 0x3FF) as u16);
+        put!((w >> 10 & 0x3FF) as u16);
+        put!((w >> 20 & 0x3FF) as u16);
+        put!((w >> 30 | h << 2) as u16);
         j += 4;
+        p = unsafe { p.add(5) };
     }
     while j < end {
-        put(get(base, j));
+        put!(get(base, j));
         j += 1;
     }
+    *acc = (lo, hi, s);
 }
 
 /// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`
