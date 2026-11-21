@@ -66,13 +66,12 @@ const STREAM_SPIN_US: u64 = 1000;
 /// 43 K next to 0.4.0's GEN / CH2 channels and the coded ring (release/0.4.0
 /// alone has 44 K, PR #200): the largest 1 K step that leaves the 8 KiB
 /// SRAM floor (docs/native-boot.md "SRAM audit"). Debug builds with RAM-hungry features (dbg-touch
-/// 1.9 KB, acdc-trace 1.8 KB, acdc-meth 0.5 KB, dbg-prof 1 KB) give up 1 K samples each
+/// 1.9 KB, acdc-trace 1.8 KB, acdc-meth 0.5 KB) give up 1 K samples each
 /// to stay above the 8 KiB SRAM floor.
 pub const CAP: usize = (43
     - cfg!(feature = "dbg-touch") as usize
     - cfg!(feature = "acdc-trace") as usize
-    - cfg!(feature = "acdc-meth") as usize
-    - cfg!(feature = "dbg-prof") as usize)
+    - cfg!(feature = "acdc-meth") as usize)
     * 1024;
 /// The digital phosphor's counts (scope_dpo.rs, 27 230 B, 8-bit since
 /// 0.4.25) live in the last DPO_K samples of BUF, but only while the
