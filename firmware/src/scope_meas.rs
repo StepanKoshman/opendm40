@@ -123,7 +123,7 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
         return r;
     }
     let volts = |c: f32| v_0 + v_k * c;
-    #[cfg(target_os = "none")]
+    #[cfg(all(target_os = "none", feature = "dbg-prof"))]
     let tm0 = crate::prof::cyc();
     let mut hist = [0u16; 1024];
     let (mut rlo, mut rhi) = (1023u16, 0u16);
@@ -160,9 +160,9 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
             i += m.max(1);
         }
     }
-    #[cfg(target_os = "none")]
+    #[cfg(all(target_os = "none", feature = "dbg-prof"))]
     let tm1 = crate::prof::cyc();
-    #[cfg(target_os = "none")]
+    #[cfg(all(target_os = "none", feature = "dbg-prof"))]
     crate::prof::add(crate::prof::MHIST, tm1.wrapping_sub(tm0));
     let (mut lo, mut hi) = (1023u16, 0u16);
     let (mut s1, mut s2) = (0u64, 0u64);
@@ -284,9 +284,9 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
             }
             i0 += m.max(1);
         }
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         let tm2 = crate::prof::cyc();
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::MEDGE, tm2.wrapping_sub(tm1));
         // Whole cycles between the first and the last rise, else fall.
         let edges = if nrise >= 2 && rises[1] > rises[0] {
@@ -324,7 +324,7 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
             r.v[4] = ln as f32 / cycles / fs;
             r.v[18] = sqrt((sum_sq(cnt, c1, c2, v_0, v_k) / cnt.max(1) as f64) as f32);
         }
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::MDUTY, crate::prof::cyc().wrapping_sub(tm2));
         r.v[5] = hp as f32;
         r.v[6] = lp as f32;

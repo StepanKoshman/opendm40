@@ -83,9 +83,7 @@ ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the
 # SRAM-free, region-A2, region-B and region-C checks are link-native.x asserts).
-# TEMPORARY (the profiling image, 2026-11-21): dbg-prof's worst path takes
-# 20 348; back to 20480 with the default features.
-if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20224 --top 0 > $TDIR/stackdepth.txt; then
+if ! python3 tools/stack-depth/stackdepth.py "$ELF" --check 20480 --top 0 > $TDIR/stackdepth.txt; then
     cat $TDIR/stackdepth.txt >&2
     exit 1
 fi

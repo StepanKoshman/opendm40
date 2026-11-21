@@ -44,9 +44,12 @@ official opendm40 release.
 - **Scope: finer DPO / HOT and faster drawing** (owner). The phosphor's
   cells are 2 rows high instead of 4, so a slope no longer shows 4-row
   steps; it keeps a level per cell instead of a count, in the same memory,
-  so the record is as long as before. The columns' min / max (and Hi-res
-  mean) read the record four samples at a time: a 200 µs/div frame built
-  in 5.1 ms before.
+  so the record is as long as before. Faster drawing (device profile,
+  HOT at 200 µs/div): 24.7 -> 43 frames/s. The columns' min / max (and
+  Hi-res mean) and the measurements read the record four samples at a
+  time (columns 5.1 -> 2.0 ms, measurements 16 -> 9 ms); the graph skips
+  the columns with no change and its "nothing changed" test is cheaper;
+  the phosphor's decay uses a level table.
 
 ### Removed
 

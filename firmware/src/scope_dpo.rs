@@ -140,7 +140,9 @@ static NCH: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0
 
 #[inline]
 fn mark(dt: &mut (u8, u8), b: usize) {
-    NCH.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    if cfg!(feature = "dbg-prof") {
+        NCH.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    }
     if dt.1 == 0 {
         *dt = (b as u8, b as u8 + 1);
     } else {
@@ -289,7 +291,7 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     let dt = now.wrapping_sub(s.t_fade[g]);
     s.t_fade[g] = now;
     if tau == 0 {
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::NCELL, NCH.load(core::sync::atomic::Ordering::Relaxed).saturating_mul(200));
         return;
     }
@@ -316,7 +318,7 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
             }
         }
     }
-    #[cfg(target_os = "none")]
+    #[cfg(all(target_os = "none", feature = "dbg-prof"))]
     crate::prof::add(crate::prof::NCELL, NCH.load(core::sync::atomic::Ordering::Relaxed).saturating_mul(200));
 }
 

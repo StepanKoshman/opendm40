@@ -2042,7 +2042,7 @@ const FLUSH_BUDGET: u32 = 300_000;
 /// The flush's per-column parts into the profile (fl.spans: the rows to
 /// repaint, fl.cut: holes / markers of a screen column, fl.pix: the LCD
 /// writes).
-#[cfg(target_os = "none")]
+#[cfg(all(target_os = "none", feature = "dbg-prof"))]
 #[inline(never)]
 fn prof_flush(q: &[u32; 3]) {
     crate::prof::add(crate::prof::FLS, q[0]);
@@ -2379,7 +2379,7 @@ impl Graph {
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
     /// lines, markers and colours, repainting only the rows that changed.
     pub fn flush(&mut self, m: &Model) {
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         let tf0 = cycles();
         if !m.ch1_on {
             // CH1 off: no trace, no persistence (the record is still taken).
@@ -2398,7 +2398,7 @@ impl Graph {
         if self.valid && d == o && self.holes == self.d_holes && same(&self.tr, &self.d_tr) && same(&self.ps, &self.d_ps) && same(&self.ma, &self.d_ma) && same(&self.gn, &self.d_gn) && same(&self.c2, &self.d_c2) && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
             self.part = false;
-            #[cfg(target_os = "none")]
+            #[cfg(all(target_os = "none", feature = "dbg-prof"))]
             crate::prof::add(crate::prof::FLPRE, cycles().wrapping_sub(tf0));
             return;
         }
@@ -2489,7 +2489,7 @@ impl Graph {
         // them (else a column with no change of its own is skipped).
         let col_moves = d.v != o.v || marks_changed || self.holes != self.d_holes;
         // DBG:PROF? fl.spans / fl.cut / fl.pix (cycles, this call).
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         let mut prof_q = [0u32; 3];
         // Trace-only: per-column bookkeeping, from the resume column, under
         // the device's time budget (`FLUSH_BUDGET`).
@@ -2507,9 +2507,9 @@ impl Graph {
         } else {
             None
         };
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         let tf1 = cycles();
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::FLPRE, tf1.wrapping_sub(tf0));
         for j in 0..if band.is_some() { 0 } else { NCOL } {
             let i = (start + j) % NCOL;
@@ -2517,8 +2517,11 @@ impl Graph {
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
                 self.part = true;
-                prof_flush(&prof_q);
-                crate::prof::add(crate::prof::FLLOOP, cycles().wrapping_sub(tf1));
+                #[cfg(feature = "dbg-prof")]
+                {
+                    prof_flush(&prof_q);
+                    crate::prof::add(crate::prof::FLLOOP, cycles().wrapping_sub(tf1));
+                }
                 return;
             }
             let fx = i as i16 + 1;
@@ -2541,7 +2544,7 @@ impl Graph {
             }
             // Its screen columns (one; the wide graph: one or two).
             let (sx0, sx1) = (scol(fx), scol(fx + 1) - 1);
-            #[cfg(target_os = "none")]
+            #[cfg(all(target_os = "none", feature = "dbg-prof"))]
             let tq0 = cycles();
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
             if full || vl(&d, fx) != vl(&o, fx) {
@@ -2579,7 +2582,7 @@ impl Graph {
                 self.d_gn[i] = self.gn[i];
                 self.d_c2[i] = self.c2[i];
             }
-            #[cfg(target_os = "none")]
+            #[cfg(all(target_os = "none", feature = "dbg-prof"))]
             {
                 prof_q[0] = prof_q[0].wrapping_add(cycles().wrapping_sub(tq0));
             }
@@ -2588,7 +2591,7 @@ impl Graph {
             }
             let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
             for sx in sx0..=sx1 {
-                #[cfg(target_os = "none")]
+                #[cfg(all(target_os = "none", feature = "dbg-prof"))]
                 let tq1 = cycles();
                 // The wide graph's second px of a column: no vertical line or
                 // grid dot (only the centre row's line).
@@ -2642,9 +2645,9 @@ impl Graph {
                 // `pix` inline for the rows without a marker or a horizontal
                 // line: a full graph took 108 ms through the closure.
                 let vrow = vcol.map_or(0, |_| h - 4);
-                #[cfg(target_os = "none")]
+                #[cfg(all(target_os = "none", feature = "dbg-prof"))]
                 let tq2 = cycles();
-                #[cfg(target_os = "none")]
+                #[cfg(all(target_os = "none", feature = "dbg-prof"))]
                 {
                     prof_q[1] = prof_q[1].wrapping_add(tq2.wrapping_sub(tq1));
                 }
@@ -2678,17 +2681,17 @@ impl Graph {
                         });
                     }
                 }
-                #[cfg(target_os = "none")]
+                #[cfg(all(target_os = "none", feature = "dbg-prof"))]
                 {
                     prof_q[2] = prof_q[2].wrapping_add(cycles().wrapping_sub(tq2));
                 }
             }
         }
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         prof_flush(&prof_q);
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         let tf2 = cycles();
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::FLLOOP, tf2.wrapping_sub(tf1));
         // The changed line rows (`hrows`), left to right in runs between
         // the holes over that row; per row, only the holes and markers
@@ -2807,7 +2810,7 @@ impl Graph {
         }
         self.next = 0;
         self.part = false;
-        #[cfg(target_os = "none")]
+        #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::FLPOST, cycles().wrapping_sub(tf2));
         crate::scope_dpo::done();
         self.d_dpo = dm;
