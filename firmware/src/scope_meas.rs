@@ -227,8 +227,11 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
             if (f as f32) < l { f + 1 } else { f }
         };
         let (h50, h90, f10) = (ceil(l50), ceil(l90), l10 as u16);
-        // State: true = high (passed 90 %), false = low (passed 10 %).
-        let mut state: Option<bool> = None;
+        // State: 1 = high (passed 90 %), 0 = low (passed 10 %), 2 = not
+        // known yet. Plain integers and one pass over each chunk (an
+        // Option state and per-code refill tests were ~6.5 ms a 25 000-code
+        // screen on the device).
+        let mut state = 2u8;
         let mut rises = [0usize; 2]; // first, last rising 50 % crossing
         let mut nrise = 0u32;
         // ... and falling: a frame of two periods triggered on a rising
@@ -239,51 +242,47 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usi
         let mut nfall = 0u32;
         let (mut hp, mut lp) = (0u32, 0u32);
         let mut prev_hi = d.at(0) >= h50;
-        let mut cross50: Option<usize> = None;
-        // (buf[t] is code i: refilled from i when used up)
-        let (mut m, mut t) = (0usize, 0usize);
-        for i in 0..n {
-            if t == m {
-                m = d.read(i, &mut buf);
-                t = 0;
-            }
-            let c = buf[t];
-            t += 1;
-            let now_hi = c >= h50;
-            if now_hi != prev_hi {
-                cross50 = Some(i);
-            }
-            prev_hi = now_hi;
-            match state {
-                None => {
+        // The last 50 % crossing (usize::MAX: none yet).
+        let mut cross50 = usize::MAX;
+        let mut i0 = 0;
+        while i0 < n {
+            let m = d.read(i0, &mut buf);
+            for (t, &c) in buf[..m].iter().enumerate() {
+                let i = i0 + t;
+                let now_hi = c >= h50;
+                if now_hi != prev_hi {
+                    cross50 = i;
+                    prev_hi = now_hi;
+                }
+                if state == 0 {
                     if c >= h90 {
-                        state = Some(true);
-                    } else if c <= f10 {
-                        state = Some(false);
+                        state = 1;
+                        let at = if cross50 == usize::MAX { i } else { cross50 };
+                        if nrise == 0 {
+                            rises[0] = at;
+                        }
+                        rises[1] = at;
+                        nrise += 1;
+                        lp += 1;
                     }
-                }
-                Some(false) if c >= h90 => {
-                    state = Some(true);
-                    let at = cross50.unwrap_or(i);
-                    if nrise == 0 {
-                        rises[0] = at;
+                } else if state == 1 {
+                    if c <= f10 {
+                        state = 0;
+                        let at = if cross50 == usize::MAX { i } else { cross50 };
+                        if nfall == 0 {
+                            falls[0] = at;
+                        }
+                        falls[1] = at;
+                        nfall += 1;
+                        hp += 1;
                     }
-                    rises[1] = at;
-                    nrise += 1;
-                    lp += 1;
+                } else if c >= h90 {
+                    state = 1;
+                } else if c <= f10 {
+                    state = 0;
                 }
-                Some(true) if c <= f10 => {
-                    state = Some(false);
-                    let at = cross50.unwrap_or(i);
-                    if nfall == 0 {
-                        falls[0] = at;
-                    }
-                    falls[1] = at;
-                    nfall += 1;
-                    hp += 1;
-                }
-                _ => {}
             }
+            i0 += m.max(1);
         }
         #[cfg(target_os = "none")]
         let tm2 = crate::prof::cyc();

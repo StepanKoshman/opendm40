@@ -1971,6 +1971,21 @@ impl Deco {
 /// No data in a column.
 pub const EMPTY: (i16, i16) = (i16::MAX, i16::MIN);
 
+/// Two columns' row arrays equal, as one memory compare (the derived ==
+/// of the tuples stayed a call per element at opt-level "z": the flush's
+/// "nothing changed" test of five arrays took ~0.3 ms every pass).
+#[inline(never)]
+fn same(a: &[(i16, i16); NCOL], b: &[(i16, i16); NCOL]) -> bool {
+    // SAFETY: (i16, i16) is 4 bytes, no padding; both arrays NCOL long.
+    let (x, y) = unsafe {
+        (
+            core::slice::from_raw_parts(a.as_ptr() as *const u32, NCOL),
+            core::slice::from_raw_parts(b.as_ptr() as *const u32, NCOL),
+        )
+    };
+    x == y
+}
+
 /// The graph: what each column shows and what is on the panel.
 pub struct Graph {
     /// Trace / persistence / math trace frame rows per graph column (EMPTY
@@ -2166,10 +2181,20 @@ const R_ALL: u8 = 0x80;
 /// the TCM's .bss is taken from the stack.
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut ROWS: [u8; 320] = [0; 320];
+/// What `ROWS` holds (frame height and lines; h 0: nothing yet).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut ROWS_KEY: (i16, [Option<HLine>; NL]) = (0, [None; NL]);
 
 /// Fill `ROWS` for a frame of `h` rows and its horizontal lines.
 fn row_classes(h: i16, hl: &[Option<HLine>; NL]) -> &'static [u8; 320] {
     let rows = unsafe { &mut *core::ptr::addr_of_mut!(ROWS) };
+    // Every flush call asks (a paint pass each main-loop pass): only a
+    // new height or line set recomputes them (owner 2026-11-21, speed).
+    let key = unsafe { &mut *core::ptr::addr_of_mut!(ROWS_KEY) };
+    if key.0 == h && key.1 == *hl {
+        return rows;
+    }
+    *key = (h, *hl);
     let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
     for fy in 0..h.clamp(0, 320) {
         rows[fy as usize] = row_class(fy, cy, dh);
@@ -2362,7 +2387,7 @@ impl Graph {
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && dm == self.d_dpo && !crate::scope_dpo::any() {
+        if self.valid && d == o && self.holes == self.d_holes && same(&self.tr, &self.d_tr) && same(&self.ps, &self.d_ps) && same(&self.ma, &self.d_ma) && same(&self.gn, &self.d_gn) && same(&self.c2, &self.d_c2) && dm == self.d_dpo && !crate::scope_dpo::any() {
             self.px = 0;
             self.part = false;
             #[cfg(target_os = "none")]
