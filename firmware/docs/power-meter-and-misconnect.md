@@ -1589,11 +1589,16 @@ behaviour), so the comparator rows see one polarity only.
   13.1 note 7). The negative leg below did, and DC V 6 V read 0.32 mV low at
   +4 V (device 2026-11-01, alternating A/B against `DBG:SENT:VAR 128`); it
   is off in every row since (`neg_leg`), so DC V / DC mV / ohm do not see a
-  reversed current in A. Continuity / diode carry no sentinel; the A-PROT
-  probe and the ohm / temperature jack check switch AD1 off while they run
-  (no reading then; not on 600 Mohm). Host test
-  `no_ad2_next_to_a_shown_ad1`; exceptions: the power meter, the AC rows'
-  AD1 peak hold (PeakA / PeakV) and the stock Hz row.
+  reversed current in A. Continuity / diode carry no sentinel; the ohm /
+  temperature jack check switches AD1 off while it runs (no reading then;
+  not on 600 Mohm). Host test `no_ad2_next_to_a_shown_ad1`; exceptions: the
+  power meter, the AC rows' AD1 peak hold (PeakA / PeakV), the stock Hz row
+  and the A-PROT probe: up to 0.4.24 it switched AD1 off too, so a current
+  in A stopped the DC V / mV reading and, as the alert comes with a
+  reading, the A-JACK alarm with it (owner 2026-11-20). Since 0.4.25 AD1
+  keeps converting next to the probe's AD2 (`probe_row`, AD1 written
+  last): the reading is ~80 ppm off while a current flows in A, under the
+  red alert.
 * **Negative leg** (`sentinel.rs` NEGATIVE LEG, off): DC V 6 V, DC mV and ohm
   (not 600 Mohm, not temperature, not AC+DC) carried OP2 (x1) on PB1 -> AD2 with
   the peak hold, as continuity's `Ad2A` row. The hold is read every 100 ms;

@@ -445,13 +445,13 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   DC V      r3      1000 V (10000 counts)    60.4         6.0         no (HV divider self-heating)
 //   DC mV     r1      600 mV                   60.4         6.0         yes
 //   DC mV     r0      60 mV (OP1 x10)          60.4         6.0         no (0.1 uV step: amp noise, EMF)
-//   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         no (0.1 uV across the shunt)
-//   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         no
-//   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         no
+//   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         yes (owner 2026-11-21; 0.1 uV across the shunt: thermal EMF)
+//   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         yes (owner 2026-11-21; window 16)
+//   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         yes (owner 2026-11-21; window 16)
 //   ohm       r0      60 ohm (Rref 0.1k)       75.5 (1 mohm) 7.5        no (already mohm)
 //   ohm       r1..r3  600 ohm .. 60 kohm       75.5         7.5         yes (r1: 600.000 ohm = mohm)
-//   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         no (hum / leakage)
-//   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         no (hum / leakage)
+//   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         yes (owner 2026-11-14; hum / leakage: shield the leads)
+//   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         yes (owner 2026-11-14; hum / leakage)
 //   continuity 75.5, diode 60.4, AC (AD2/RMS), cap, Hz, temp: no.
 // A single conversion has only 6..7.5 codes per extra-digit step, so the
 // extra digit comes from a moving average of the raw codes at the chopped
@@ -488,8 +488,9 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   rate    DC V / mV / A AD1 R22          ohm in range   code window (step reset ~2 counts)    readings
 //   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
 //           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
-//   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1: 8 (1.6 s),          5/s DC, ohm 2.5/s
-//   (dflt)                                                 ohm r0..r3: 16 (6.4 s), others none
+//   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1 / A: 8 (1.6 s),      5/s DC, ohm 2.5/s
+//   (dflt)                                                 mA / uA: 16 (3.2 s), ohm r0..r6:
+//                                                          16 (6.4 s), others none
 //   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
 //                                                          32, 12.8 s)
 // Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
@@ -566,14 +567,15 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
         return None;
     }
     let (medium, thr, ext) = match (mode, range) {
-        (1, 0..=2) | (3, 1) => (8, 120, true),
-        (1 | 3 | 7, _) => (1, 120, false),
-        (8, _) => (1, 60, false),
-        (9, _) => (1, 57, false),
+        (1, 0..=2) | (3, 1) | (7, _) => (8, 120, true),
+        (1 | 3, _) => (1, 120, false),
+        // mA / uA: half the codes per count of V, so twice the window.
+        (8, _) => (16, 60, true),
+        (9, _) => (16, 57, true),
         (10, 0) => (16, 150, false),
-        (10, 1..=3) => (16, 150, true),
-        (10, 6) => (1, 240, false),
-        (10, OHM600) => return None,
+        (10, 1..=5) => (16, 150, true),
+        (10, 6) => (16, 240, true),
+        (10, OHM600 | OHMNS) => return None,
         (10, _) => (1, 150, false),
         _ => return None,
     };
@@ -710,6 +712,19 @@ const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
     c[0x0B] &= !0x06;
     c
 };
+/// The experimental 1.07 mA ohm variant (`ohm_var` 2, Settings > Other
+/// "Ohm 1.07 mA"; owner 2026-11-21): the default rows r0..r5 with the
+/// source tap R31 SFUVR VDS15 (2) -> VDS16 (1), 0.90 -> 1.07 mA on 600 ohm
+/// (docs/data/short.csv). The measurement is a ratio against Rref, so the
+/// factory calibration (per range, the same for every variant: the stock
+/// "ON" rows use it too) applies unchanged; nothing is written to it. r6
+/// (the current-source row) keeps its own. Built in `write_config` (no
+/// table in region B's rodata).
+fn ohm_1ma_row(r: usize) -> [u8; hy::CFG_LEN] {
+    let mut c = if r == 0 { OHM_R0_ROW } else { CFG_F10_P8CLR[r.min(5)] };
+    c[0x11] = (c[0x11] & 0xF0) | 1;
+    c
+}
 
 // Ohm r7: the experimental 600 Mohm range (firmware/docs/ohm-600m.md). Manual
 // only: the autorange, the AUTO key's short-press range steps and a restored
@@ -722,10 +737,26 @@ const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
 // 2026-10-28: FB via OP1 vs FB on AD1 directly 5.7 uV apart).
 // R = Rref * Vx / (Vfb - Vx); a ratio of two conversions on one reference.
 pub const OHM600: i8 = 7;
-/// Whether HY3131 `mode` / `range` is the experimental 600 Mohm.
+/// Ohm r8: conductance, 60.00 nS (owner 2026-11-21). The 600 Mohm hardware
+/// and phases (`is_ohm600` holds for it too), the result as G = I / Vx:
+/// (Vfb - Vx) / (Rref Vx), less the learned leak. It goes to 0 as R goes
+/// up (no division by a vanishing drop), and a parallel leak only adds to
+/// it, so REL on open leads takes the jacks' own leakage off. Manual only,
+/// as 600 Mohm.
+pub const OHMNS: i8 = 8;
+/// Whether HY3131 `mode` / `range` runs the 600 Mohm hardware (600 Mohm or
+/// nS).
 pub fn is_ohm600(mode: u8, range: i8) -> bool {
-    mode == 10 && range == OHM600
+    mode == 10 && (range == OHM600 || range == OHMNS)
 }
+/// Whether HY3131 `mode` / `range` is the nS range.
+pub fn is_ns(mode: u8, range: i8) -> bool {
+    mode == 10 && range == OHMNS
+}
+/// nS full scale, and the floor of the step that restarts its average (nS;
+/// `Ohm600::average`: 2 % of the mean, at least 2 % of this).
+const NS_FS: f32 = 60.0;
+const NS_STEP_FLOOR: f32 = 5.0;
 /// The ohm autorange's top: 60 Mohm (r7 is manual only).
 const OHM_AUTO_TOP: i8 = 6;
 /// Open leads (`Ohm600::learn`): the drop across Rref below this (an Rx
@@ -837,6 +868,15 @@ impl Ohm600 {
         Some(OHM600_R32[self.ph as usize])
     }
 
+    /// nS from the phase codes (may be a little below 0: noise, the leak's
+    /// estimate), None = OL (above `fs`, or the jack at COM: a short).
+    fn ns(&self, a: i32, b: i32, fs: f32) -> Option<f32> {
+        let vx = a as f32 * OHM600_V;
+        let drop = (b - a) as f32 * OHM600_V - self.off;
+        let g = drop / (OHM600_RREF * 1e3 * self.gain * vx) * 1e9 - self.leak * 1e9;
+        (vx > 0.01 && g <= fs).then_some(g)
+    }
+
     /// kohm from the phase codes, None = OL (no drop across Rref, or above
     /// the range).
     fn kohm(&self, a: i32, b: i32, ov: f32) -> Option<f32> {
@@ -869,12 +909,13 @@ impl Ohm600 {
         self.leak_n = self.leak_n.saturating_add(1);
     }
 
-    /// The sliding mean with `k` added (restarted on a step).
-    fn average(&mut self, k: f32) -> f32 {
+    /// The sliding mean with `k` added (restarted on a step of more than
+    /// OHM600_STEP of the mean, at least of `floor`).
+    fn average(&mut self, k: f32, floor: f32) -> f32 {
         let n = self.hn as usize;
         if n > 0 {
             let mean = self.hist[..n].iter().sum::<f32>() / n as f32;
-            if (k - mean).abs() > OHM600_STEP * mean.abs().max(1.0) {
+            if (k - mean).abs() > OHM600_STEP * mean.abs().max(floor) {
                 self.hn = 0;
             }
         }
@@ -956,14 +997,16 @@ fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
 /// `Dmm::write_config`) = r1's default value, inferred: its own row has the
 /// same tap and Rref switches but was not measured. r6 (60 M, the
 /// current-source row): not measured, None.
-pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
-    [Some(8.983e-4), Some(8.983e-4)],
-    [Some(8.983e-4), Some(2.795e-4)],
-    [Some(1.969e-4), Some(5.842e-5)],
-    [Some(2.026e-5), Some(6.559e-6)],
-    [Some(2.172e-6), Some(6.640e-7)],
-    [Some(2.153e-7), Some(8.557e-8)],
-    [None, None],
+/// Third column: the experimental 1.07 mA variant (`ohm_var` 2, `ohm_1ma_row`:
+/// VDS16, docs/data/short.csv VDS16 rows; r0 as r1).
+pub const OHM_ISC: [[Option<f32>; 3]; 7] = [
+    [Some(8.983e-4), Some(8.983e-4), Some(1.069e-3)],
+    [Some(8.983e-4), Some(2.795e-4), Some(1.069e-3)],
+    [Some(1.969e-4), Some(5.842e-5), Some(2.091e-4)],
+    [Some(2.026e-5), Some(6.559e-6), Some(2.093e-5)],
+    [Some(2.172e-6), Some(6.640e-7), Some(2.217e-6)],
+    [Some(2.153e-7), Some(8.557e-8), Some(2.197e-7)],
+    [None, None, None],
 ];
 /// Diode test current (A): OP3 as a current source (SMODE 0110, SCP / SCN)
 /// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
@@ -979,10 +1022,10 @@ pub const CONT_I: f32 = -0.260e-3;
 /// OHM_ISC, the most the range drives through the probes (with R between
 /// them it is less). None where it is not measured (r6).
 pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
-    if r == OHM600 {
+    if r == OHM600 || r == OHMNS {
         return Some(OHM600_ISC);
     }
-    OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
+    OHM_ISC[r.clamp(0, 6) as usize][var.min(2) as usize]
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
@@ -2098,6 +2141,10 @@ pub struct Dmm {
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
+    /// Settings > Other "Ohm 1.07 mA" (experimental): the third test current
+    /// (`ohm_var` 2, `ohm_1ma_row`) on the range page and in the ohm button's
+    /// cycle.
+    pub ohm_1ma: bool,
     /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..31 in
     /// mohm; `poll_ohm`): the test leads' resistance in ohm, taken off every
     /// ohm reading of r0..r6, independent of REL. 0 = off.
@@ -2731,6 +2778,7 @@ impl Dmm {
             tr: tr::tr_static(),
             burden_show: false,
             ohm_neg: false,
+            ohm_1ma: false,
             ohm_null: 0.0,
             o6: Ohm600::NEW,
         }
@@ -2778,10 +2826,11 @@ impl Dmm {
     /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
     /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
-        self.ohm_var = v & 1;
+        // 2: the experimental 1.07 mA (`ohm_1ma_row`), only while enabled.
+        self.ohm_var = if v == 2 && self.ohm_1ma { 2 } else { v & 1 };
         // 600 Mohm has its own source: the variant waits for the next range
         // (no row rewrite, no restart of its phases).
-        if self.mode == 10 && self.range != OHM600 {
+        if self.mode == 10 && !is_ohm600(self.mode, self.range) {
             // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
             let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
@@ -2792,6 +2841,16 @@ impl Dmm {
         self.ohm_var
     }
 
+    /// Settings > Other "Ohm 1.07 mA": off takes the 1.07 mA variant back
+    /// to 0.90 mA (the caller rewrites the row, `set_ohm_var`, when ohm is
+    /// measuring).
+    pub fn set_ohm_1ma(&mut self, on: bool) {
+        self.ohm_1ma = on;
+        if !on && self.ohm_var == 2 {
+            self.ohm_var = 0;
+        }
+    }
+
     /// The buttons' last sub-modes (`submem`), for the settings record.
     pub fn sub_mem(&self) -> u8 {
         self.sub_mem
@@ -2800,7 +2859,7 @@ impl Dmm {
     /// force is not changed) and the ohm test current (0 / 1).
     pub fn set_sub_mem(&mut self, mem: u8, ohm: u8) {
         self.sub_mem = mem & 0x3F;
-        if ohm <= 1 {
+        if ohm <= 1 || (ohm == 2 && self.ohm_1ma) {
             self.ohm_var = ohm;
         }
     }
@@ -2830,7 +2889,7 @@ impl Dmm {
         if matches!(a, 1 | 3) {
             self.a_auto = a;
         }
-        if ohm <= 1 {
+        if ohm <= 1 || (ohm == 2 && self.ohm_1ma) {
             self.ohm_var = ohm;
         }
     }
@@ -3010,6 +3069,8 @@ impl Dmm {
         }
         let m = self.mode;
         let r = self.range.max(0) as usize;
+        // The 1.07 mA variant's row (`ohm_1ma_row`), built here.
+        let row1ma;
         let cfg: &[u8; hy::CFG_LEN] = match m {
             0 => &CFG_F0[r.min(3)],
             1 => &CFG_F1[r.min(3)],
@@ -3021,9 +3082,12 @@ impl Dmm {
             8 | 9 => &CFG_F8_9[r.min(1)],
             // r0 (60 ohm) always with the higher-current default variant.
             10 => {
-                if r == OHM600 as usize {
+                if r >= OHM600 as usize {
                     self.o6.restart();
                     &OHM600_ROW
+                } else if self.ohm_var == 2 && r <= 5 {
+                    row1ma = ohm_1ma_row(r);
+                    &row1ma
                 } else if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
@@ -3656,6 +3720,7 @@ impl Dmm {
             4 | 7 => (4 - r.min(1), "A"),
             5 | 8 => (3 - r.min(1), "mA"),
             6 | 9 => (2 - r.min(1), "\u{b5}A"),
+            10 if r == OHMNS as u8 => (2, "nS"),
             10 if r == OHM600 as u8 => (1, "M\u{3a9}"),
             10 => match r {
                 0 | 1 => (3 - r, "\u{3a9}"),
@@ -4224,7 +4289,9 @@ impl Dmm {
                     self.manual = false;
                     self.set(clk, 10, 6, OHM_ENTRY_MS);
                 } else if !is_ohm600(self.mode, self.range) {
-                    self.set_ohm_var(clk, self.ohm_var ^ 1);
+                    // 0.90 -> 0.28 ON (-> 1.07 mA, experimental) -> 0.90.
+                    let n = if self.ohm_1ma { (self.ohm_var + 1) % 3 } else { (self.ohm_var == 0) as u8 };
+                    self.set_ohm_var(clk, n);
                 }
             }
             Button::Cap => {
@@ -4386,8 +4453,9 @@ impl Dmm {
                     self.cap_set_range(clk, i);
                 }
             }
-            // 7: the experimental 600 Mohm (`OHM600`), only by this choice.
-            (Button::Ohm, Some(i)) if i <= OHM600 as u8 => {
+            // 7: the experimental 600 Mohm (`OHM600`), 8: nS (`OHMNS`), only
+            // by this choice.
+            (Button::Ohm, Some(i)) if i <= OHMNS as u8 => {
                 self.manual = true;
                 if !self.same_row(10, i as i8) {
                     self.set(clk, 10, i as i8, 150);
@@ -4448,7 +4516,7 @@ impl Dmm {
                 // BT has no 60 ohm or 600 Mohm range: report them as 600
                 // ohm / 60 Mohm.
                 let r = if self.manual { self.range.clamp(1, 6) as u8 - 1 } else { 6 };
-                self.ohm_var << 6 | r << 3 | 2
+                (self.ohm_var & 1) << 6 | r << 3 | 2
             }
             11 => 0x44,
             12 => 0x04,
@@ -4473,7 +4541,7 @@ impl Dmm {
         }
         // The ohm ranges BT has no code for (60 ohm, 600 Mohm: reported as
         // 600 ohm / 60 Mohm, `mode_byte`): that byte echoed back keeps them.
-        if self.mode == 10 && self.manual && matches!(self.range, 0 | OHM600) && b == self.mode_byte() {
+        if self.mode == 10 && self.manual && matches!(self.range, 0 | OHM600 | OHMNS) && b == self.mode_byte() {
             return false;
         }
         self.ovl_clear(clk.now_ms());
@@ -4685,8 +4753,9 @@ impl Dmm {
         if self.wake_at != 0 {
             return self.wd_slow(clk, now, 0);
         }
-        // (the probe / jack check's row has AD1 off: no reading, no stall)
-        if now.saturating_sub(self.wd_poll) > 500 || self.probe {
+        // (the jack check's row has AD1 off: no reading, no stall; the
+        // A-PROT probe's keeps AD1, sentinel `probe_row`)
+        if now.saturating_sub(self.wd_poll) > 500 || (self.probe && self.jack_mode()) {
             self.wd_t = now;
         }
         self.wd_poll = now;
@@ -5292,8 +5361,10 @@ impl Dmm {
         // After a range change (VET_*); the OVERLOAD check below still sees
         // every conversion.
         let vet = self.vet_ad1(ad1);
-        // FR-05 SLOW only (MEDIUM: no window in A, as the stock).
-        let (code, _) = if vet { self.avg_code(ad1, slow) } else { (ad1 as f32, false) };
+        // The window and the extra digit as DC V (avg_cfg; owner
+        // 2026-11-21: in 0.4.24 the digit was enabled in avg_cfg but this
+        // flag was dropped here, so it never showed).
+        let (code, ext) = if vet { self.avg_code(ad1, slow) } else { (ad1 as f32, false) };
         let (m, r) = (self.mode, self.range as usize);
         let before = (m, self.range);
         let u = (m - 7) as usize; // 0 A, 1 mA, 2 uA
@@ -5343,7 +5414,7 @@ impl Dmm {
             1 => ("mA", 3 - r as u8, 1e-3),
             _ => ("\u{b5}A", 2 - r as u8, 1e-6),
         };
-        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, false, vet)?;
+        let mut rd = self.dc_out(clk, a, lim, dec, unit, si_k, before, ext, vet)?;
         // A held conversion (G2): provisional.
         rd.prov |= !vet;
         if self.burden_show && !self.acdc {
@@ -5958,7 +6029,12 @@ impl Dmm {
             hy::write(0x23, &[r23]);
         }
         let (a, b) = done?;
-        self.o6.learn(a, b);
+        // The leak is learned on 600 Mohm only: in nS a high resistor (below
+        // ~0.14 nS) would pass for open leads. nS takes the learned one.
+        let ns = self.range == OHMNS;
+        if !ns {
+            self.o6.learn(a, b);
+        }
         // LIVE?: the jack below COM, or driven above OP3's side of Rref.
         self.live = a < -LIVE_CODE || b - a < -LIVE_CODE;
         // Final from the first reading on: each one is already the median of
@@ -5966,9 +6042,23 @@ impl Dmm {
         // the first 5.568 Mohm, then 5.569 .. 5.571), and a provisional one
         // never reaches SCPI (a mains-noisy input restarting the average
         // would have kept it so).
+        if ns {
+            let val = match self.o6.ns(a, b, self.over() * NS_FS) {
+                Some(g) => {
+                    let v = self.o6.average(g, NS_STEP_FLOOR);
+                    Val::new(v, 2, "nS")
+                }
+                None => {
+                    self.o6.hn = 0;
+                    Val::ol(2, "nS")
+                }
+            };
+            let si = if val.ol { 2.0 * NS_FS * 1e-9 } else { val.v * 1e-9 };
+            return Some(self.ohm600_reading(val, si, false));
+        }
         let (val, si, prov) = match self.o6.kohm(a, b, self.over()) {
             Some(k) => {
-                let v = self.o6.average(k);
+                let v = self.o6.average(k, 1.0);
                 let dec = self.o6.decimals(v * 1e-3);
                 let ext = self.o6.ext(dec);
                 (Val::new(v * 1e-3, dec, "M\u{3a9}").with_ext(ext), v * 1e3, false)
@@ -6242,10 +6332,11 @@ impl Dmm {
     /// APROT_GONE_MS. Without hits and without the latch the probe leaves.
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
-        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe holds AD1
-        // off, so it goes in only once the gate has a verdict of this run
-        // (DC mV's A-PROT trip needs one anyway), and that verdict stands
-        // while the probe runs.
+        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe goes in
+        // only once the gate has a verdict of this run (DC mV's A-PROT trip
+        // needs one anyway); that verdict stands while the probe runs, and
+        // the row's results (AD1 keeps converting, sentinel `probe_row`)
+        // update it.
         let mv = self.mode == 3;
         if self.probe && mv {
             self.sent.v_side_hold(now);
@@ -8227,19 +8318,48 @@ mod tests {
     }
 
     #[test]
+    fn ns_conductance() {
+        let code = |v: f32| (v / OHM600_V) as i32;
+        let o = Ohm600::NEW;
+        // 1 Gohm against Rref 10 Mohm at Vfb 1.05 V: Vx = 1.05 * 1000 / 1010,
+        // G = 1 nS.
+        let vf = 1.05;
+        let vx = vf * 1000.0 / 1010.0;
+        let g = o.ns(code(vx), code(vf), 60.0).unwrap();
+        assert!((g - 1.0).abs() < 0.01, "{g}");
+        // 16.67 Mohm: 60 nS; 20 Mohm: 50 nS; above 60 nS: OL.
+        let vx = vf * 20.0 / 30.0;
+        assert!((o.ns(code(vx), code(vf), 60.0).unwrap() - 50.0).abs() < 0.1);
+        let vx = vf * 10.0 / 20.0;
+        assert!(o.ns(code(vx), code(vf), 60.0).is_none());
+        // Open leads: no drop, 0 nS; the jack at COM (a short): OL.
+        assert!(o.ns(code(vf), code(vf), 60.0).unwrap().abs() < 0.01);
+        assert!(o.ns(0, code(vf), 60.0).is_none());
+        // A learned leak (21.6 Gohm = 0.046 nS) comes off.
+        let o = Ohm600 { leak: 1.0 / 21.6e9, ..Ohm600::NEW };
+        let vx = vf * 100_000.0 / 100_010.0; // 100 Gohm: 0.01 nS
+        let g = o.ns(code(vx), code(vf), 60.0).unwrap();
+        assert!((g - (0.01 - 0.0463)).abs() < 0.005, "{g}");
+        // The nS range shares the 600 Mohm hardware; no rate window.
+        assert!(is_ohm600(10, OHMNS) && is_ns(10, OHMNS) && !is_ns(10, OHM600));
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, OHMNS), None);
+        assert_eq!(ohm_test_current(OHMNS, 0), Some(OHM600_ISC));
+    }
+
+    #[test]
     fn ohm600_average() {
         let mut o = Ohm600::NEW;
-        assert_eq!(o.average(100_000.0), 100_000.0);
-        assert_eq!(o.average(101_000.0), 100_500.0);
+        assert_eq!(o.average(100_000.0, 1.0), 100_000.0);
+        assert_eq!(o.average(101_000.0, 1.0), 100_500.0);
         // A step over 2 %: the mean starts over.
-        assert_eq!(o.average(110_000.0), 110_000.0);
+        assert_eq!(o.average(110_000.0, 1.0), 110_000.0);
         assert_eq!(o.hn, 1);
         for k in [110_100.0, 110_200.0, 110_300.0, 110_400.0] {
-            o.average(k);
+            o.average(k, 1.0);
         }
         // The last OHM600_AVG (4) only.
         assert_eq!(o.hn as usize, OHM600_AVG);
-        assert!((o.average(110_500.0) - 110_350.0).abs() < 1.0);
+        assert!((o.average(110_500.0, 1.0) - 110_350.0).abs() < 1.0);
     }
 
     #[test]
@@ -8263,24 +8383,24 @@ mod tests {
         // mean of 4 at 0.1 kohm: shown.
         let mut o = Ohm600::NEW;
         for k in [5570.5, 5570.7, 5570.4, 5570.6] {
-            o.average(k);
+            o.average(k, 1.0);
         }
         assert!(o.ext(3));
         // Twice that spread: not at 3 decimals, at 2 (1 kohm).
         let mut o = Ohm600::NEW;
         for k in [5570.0, 5570.6, 5569.8, 5570.9] {
-            o.average(k);
+            o.average(k, 1.0);
         }
         assert!(!o.ext(3));
         assert!(o.ext(2));
         // Not before the window is full.
         let mut o = Ohm600::NEW;
-        o.average(5570.0);
+        o.average(5570.0, 1.0);
         assert!(!o.ext(1));
         // Hysteresis: a mean sd of 1.0 digit keeps it on, does not turn it on.
         let mut o = Ohm600::NEW;
         for k in [5570.0, 5570.2, 5569.8, 5570.0] {
-            o.average(k);
+            o.average(k, 1.0);
         }
         // sd 0.163 kohm, of the mean 0.082: 0.82 digit at 3 decimals.
         assert!(!o.ext(3));
@@ -8345,6 +8465,24 @@ mod tests {
         assert_eq!(o.leak, l);
         o.learn(a, b);
         assert_eq!(o.leak, l);
+    }
+
+    #[test]
+    fn ohm_1ma_rows() {
+        // The default rows with the source tap VDS16, nothing else changed.
+        for r in 0..6 {
+            let base = if r == 0 { OHM_R0_ROW } else { CFG_F10_P8CLR[r] };
+            assert_eq!(base[0x11] & 0x0F, 2, "r{r}: VDS15");
+            let row = ohm_1ma_row(r);
+            assert_eq!(row[0x11] & 0x0F, 1, "r{r}: VDS16");
+            let d: Vec<usize> = (0..hy::CFG_LEN).filter(|&i| row[i] != base[i]).collect();
+            assert_eq!(d, vec![0x11], "r{r}");
+        }
+        assert_eq!(ohm_test_current(1, 2), Some(1.069e-3));
+        assert_eq!(ohm_test_current(0, 2), Some(1.069e-3));
+        assert_eq!(ohm_test_current(6, 2), None);
+        // Above 2: the third column, not out of bounds.
+        assert_eq!(ohm_test_current(2, 7), Some(2.091e-4));
     }
 
     #[test]
@@ -8612,15 +8750,20 @@ mod tests {
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 2), Some((16, 150, true)));
         assert_eq!(avg_cfg(Rate::Medium, false, 10, 0), Some((16, 150, false)));
         assert_eq!(avg_cfg(Rate::Medium, false, 1, 3), None);
-        assert_eq!(avg_cfg(Rate::Medium, false, 8, 0), None);
-        assert_eq!(avg_cfg(Rate::Medium, false, 10, 5), None);
+        // Ohm up to 60 Mohm (owner 2026-11-14); A / mA / uA (2026-11-21).
+        assert_eq!(avg_cfg(Rate::Medium, false, 7, 0), Some((8, 120, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 8, 0), Some((16, 60, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 9, 1), Some((16, 57, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, 5), Some((16, 150, true)));
+        assert_eq!(avg_cfg(Rate::Medium, false, 10, 6), Some((16, 240, true)));
         // SLOW: every AD1 DC range, longer.
         assert_eq!(avg_cfg(Rate::Slow, false, 1, 0), Some((16, 120, true)));
         assert_eq!(avg_cfg(Rate::Slow, false, 1, 3), Some((16, 120, false)));
-        assert_eq!(avg_cfg(Rate::Slow, false, 8, 1), Some((16, 60, false)));
-        assert_eq!(avg_cfg(Rate::Slow, false, 9, 0), Some((16, 57, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 7, 1), Some((16, 120, true)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 8, 1), Some((16, 60, true)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 9, 0), Some((16, 57, true)));
         assert_eq!(avg_cfg(Rate::Slow, false, 10, 3), Some((32, 150, true)));
-        assert_eq!(avg_cfg(Rate::Slow, false, 10, 6), Some((16, 240, false)));
+        assert_eq!(avg_cfg(Rate::Slow, false, 10, 6), Some((16, 240, true)));
         // FAST, AC+DC, other functions: none.
         for m in [1, 3, 7, 8, 9, 10] {
             assert_eq!(avg_cfg(Rate::Fast, false, m, 1), None);
@@ -8658,7 +8801,11 @@ mod tests {
         assert!(!ext_possible(Rate::Slow, false, 1, 3));
         assert!(!ext_possible(Rate::Slow, false, 3, 0));
         assert!(ext_possible(Rate::Slow, false, 10, 3));
-        assert!(!ext_possible(Rate::Slow, false, 10, 4));
+        assert!(ext_possible(Rate::Slow, false, 10, 4));
+        assert!(!ext_possible(Rate::Slow, false, 10, 0));
+        assert!(ext_possible(Rate::Medium, false, 8, 0));
+        assert!(ext_possible(Rate::Medium, false, 7, 1));
+        assert!(!ext_possible(Rate::Fast, false, 7, 0));
     }
 
     #[test]

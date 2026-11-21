@@ -20,8 +20,6 @@ mod hy3131 {
 mod hy3131_tables;
 #[path = "../../src/dbgsrc.rs"]
 mod dbgsrc;
-#[path = "../../src/touchcal.rs"]
-mod touchcal;
 
 mod boot {
     pub fn put_info(_s: &mut crate::scpi::Scpi) {}
@@ -526,20 +524,13 @@ fn idn() {
     check(!want.is_empty() && ident::VERSION == want, &format!("ident::VERSION {:?} = tools/fw-version.sh {want:?}", ident::VERSION));
 }
 
-/// DBG:TOUCH:CAL? / RESET / a,b,c,d,e,f (the values via touchcal.rs).
+/// DBG:TOUCH:CAL is gone with the touch calibration (owner 2026-11-20):
+/// an unknown header now.
 fn touch_cal() {
     let mut s = Scpi::new();
-    check(matches!(s.handle(b"DBG:TOUCH:CAL?", 1), Out::Instr(Cmd::DbgTouchCal(0))), "DBG:TOUCH:CAL?");
-    check(matches!(s.handle(b"DBG:TOUCH:CAL RESET", 1), Out::Instr(Cmd::DbgTouchCal(1))), "DBG:TOUCH:CAL RESET");
-    check(matches!(s.handle(b"dbg:touch:cal res", 1), Out::Instr(Cmd::DbgTouchCal(1))), "dbg:touch:cal res");
-    check(matches!(s.handle(b"DBG:TOUCH:CAL 0.9961,0.0101,-5.65,0.0061,0.9523,0.7", 1), Out::Instr(Cmd::DbgTouchCal(2))), "DBG:TOUCH:CAL six numbers");
-    let c = touchcal::scpi_take();
-    check(c.is_some_and(|c| (c[2] - (-5.65f32 * 65536.0) as i32).abs() <= 1 && c[0] == ((0.9961f32 - 1.0) * 65536.0 - 0.5) as i32), "DBG:TOUCH:CAL values kept");
-    check(touchcal::scpi_take().is_none(), "DBG:TOUCH:CAL values taken once");
-    check(err(&mut s) == "0,\"No error\"", "no error after the good DBG:TOUCH:CAL");
-    for bad in ["DBG:TOUCH:CAL 1,0,0,0,1", "DBG:TOUCH:CAL 1,0,0,0,1,0,0", "DBG:TOUCH:CAL 1,0,x,0,1,0", "DBG:TOUCH:CAL"] {
-        check(!matches!(s.handle(bad.as_bytes(), 1), Out::Instr(_)), &format!("{bad}: refused"));
-        check(err(&mut s).starts_with('-'), &format!("{bad}: an error"));
+    for c in ["DBG:TOUCH:CAL?", "DBG:TOUCH:CAL RESET", "DBG:TOUCH:CAL 1,0,0,0,1,0"] {
+        check(!matches!(s.handle(c.as_bytes(), 1), Out::Instr(_)), &format!("{c}: refused"));
+        check(err(&mut s).starts_with('-'), &format!("{c}: an error"));
     }
 }
 

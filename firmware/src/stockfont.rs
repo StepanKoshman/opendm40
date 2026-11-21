@@ -243,6 +243,7 @@ mod data {
         /// Coverage of row `y` (0..h) into buf[..w]. HUF walks forward from
         /// `c` (asking the same row again or any later row is cheap, an
         /// earlier one restarts from the top); the other formats ignore it.
+        #[inline(never)]
         pub fn row(&self, c: &mut Cur, y: u32, buf: &mut [u8; MAXW]) {
             let w = (self.w as usize).min(MAXW);
             match self.fmt {
@@ -550,6 +551,8 @@ fn twin_alpha(g: &Glyph, twin: i16, gx: u32, gy: u32) -> u8 {
     if t > 0 && gx >= t && gx - t < w { a.max(g.alpha(gx - t, gy)) } else { a }
 }
 
+// One copy for glyphs / glyphs_outlined / the others (flash: region B).
+#[inline(never)]
 fn layout(font: Font, r: Rect, text: &str, align: u8, spacing: i8, out: &mut [Option<Placed>; MAXG]) -> usize {
     // Measure.
     let mut n = 0;
@@ -954,6 +957,119 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
             for gx in 0..w as usize {
                 out.px(lut[twin_buf(&buf, p.g.w, p.twin, gx) as usize]);
             }
+        }
+    }
+    #[cfg(test)]
+    crate::probe::end();
+}
+
+/// `glyphs` with an outline: each ink pixel's 8 neighbours take `ol`
+/// (as strong as their ink), then the text in `fg` on top; only the text's
+/// box grown by 1 px is painted (on `bg`). The value on the DMM's beeper
+/// band (ui.rs band_aux: orange on green, outlined in black, owner
+/// 2026-11-12). Up to 126 x 28 px of text (else plain `glyphs`).
+// Region A2 (zero-wait, after the shim; 2.3 KiB were free): B and C have
+// no room left for it (0.4.24). Its callees (layout, Glyph::row, blend,
+// ramp) stay in B.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.glyphs_outlined")]
+pub fn glyphs_outlined(font: Font, r: Rect, text: &str, fg: Color, ol: Color, bg: Color, align: u8, spacing: i8) {
+    // The coverage is decoded a row at a time (each glyph's cursor), three
+    // rows kept: no box-sized buffer on the stack (the stack's 20 KiB
+    // headroom, build.sh).
+    const CW: usize = 128;
+    let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
+    let n = layout(font, r, text, align, spacing, &mut pl);
+    // The glyphs' box (screen), grown by the outline's 1 px.
+    let (mut x0, mut y0, mut x1, mut y1) = (i16::MAX, i16::MAX, i16::MIN, i16::MIN);
+    for p in pl[..n].iter().flatten() {
+        if p.g.w == 0 || p.g.h == 0 {
+            continue;
+        }
+        x0 = x0.min(p.x - 1);
+        y0 = y0.min(p.y - 1);
+        x1 = x1.max(p.x + p.g.w as i16 + p.twin);
+        y1 = y1.max(p.y + p.g.h as i16);
+    }
+    if x0 > x1 {
+        return;
+    }
+    if (x1 - x0 + 1) as usize > CW || x0 < 0 || y0 < 0 {
+        glyphs(font, r, text, fg, bg, align, spacing);
+        return;
+    }
+    if !lcd::rows_hit(y0, y1) {
+        return;
+    }
+    let bw = (x1 - x0 + 1) as usize;
+    // Screen row y's coverage (0..15) over x0..=x1; rows in order from y0.
+    let row = |curs: &mut [Cur; MAXG], y: i16, out: &mut [u8; CW]| {
+        out.fill(0);
+        let mut buf = [0u8; MAXW];
+        for (k, p) in pl[..n].iter().enumerate() {
+            let Some(p) = p else { continue };
+            if p.g.w == 0 || y < p.y || y >= p.y + p.g.h as i16 {
+                continue;
+            }
+            p.g.row(&mut curs[k], (y - p.y) as u32, &mut buf);
+            for gx in 0..p.g.w as i16 + p.twin {
+                let k = (p.x - x0 + gx) as usize;
+                out[k] = out[k].max(twin_buf(&buf, p.g.w, p.twin, gx as usize));
+            }
+        }
+    };
+    // Pass 1: the ink's box (the glyph boxes' empty rows and columns are
+    // not painted: the text keeps its margins).
+    let mut curs = [Cur::default(); MAXG];
+    let mut cur = [0u8; CW];
+    let (mut ix0, mut ix1, mut iy0, mut iy1) = (bw, 0usize, i16::MAX, i16::MIN);
+    for y in y0..=y1 {
+        row(&mut curs, y, &mut cur);
+        for (x, &v) in cur[..bw].iter().enumerate() {
+            if v != 0 {
+                (ix0, ix1, iy0, iy1) = (ix0.min(x), ix1.max(x), iy0.min(y), iy1.max(y));
+            }
+        }
+    }
+    if ix0 > ix1 {
+        return;
+    }
+    let (ix0, ix1, iy0, iy1) = (ix0.saturating_sub(1), (ix1 + 1).min(bw - 1), iy0 - 1, iy1 + 1);
+    let Some((ya, yb)) = lcd::clip_rows(iy0, iy1) else {
+        return;
+    };
+    // Pass 2: the rows again, three at a time (above, this, below).
+    let olr = ramp(ol, bg);
+    let mut curs = [Cur::default(); MAXG];
+    let (mut up, mut nx) = ([0u8; CW], [0u8; CW]);
+    cur = [0u8; CW];
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::TEXT, bg);
+    #[cfg(test)]
+    crate::probe::sub(0);
+    let (sx0, sx1) = (x0 + ix0 as i16, x0 + ix1 as i16);
+    lcd::set_window(sx0 as u16, ya as u16, sx1 as u16, yb as u16);
+    for y in y0..=y1 + 1 {
+        // nx: row y; cur: y - 1; up: y - 2.
+        up = cur;
+        cur = nx;
+        if y <= y1 {
+            row(&mut curs, y, &mut nx);
+        } else {
+            nx = [0u8; CW];
+        }
+        let sy = y - 1;
+        if sy < ya || sy > yb {
+            continue;
+        }
+        let mut out = if sx1 < lcd::W as i16 { lcd::row_out(sy, sx0) } else { lcd::Out::panel() };
+        for x in ix0..=ix1 {
+            let (l, h) = (x.saturating_sub(1), (x + 1).min(bw - 1));
+            let mut o = 0u8;
+            for k in l..=h {
+                o = o.max(up[k]).max(cur[k]).max(nx[k]);
+            }
+            out.px(blend(fg, olr[o as usize], cur[x]));
         }
     }
     #[cfg(test)]

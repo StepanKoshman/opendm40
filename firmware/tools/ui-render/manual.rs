@@ -206,6 +206,21 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm-600m", &page, false);
     save1(out, "range-ohm-600m");
 
+    // The experimental 1.07 mA test current (Settings > Other "Ohm 1.07
+    // mA"): three variant buttons, the third chosen.
+    host::reset(0);
+    ui::OHM3.store(true, core::sync::atomic::Ordering::Relaxed);
+    ui::range_page(Button::Ohm, Some(2), 2, None);
+    ui::OHM3.store(false, core::sync::atomic::Ordering::Relaxed);
+    ck.check_opts("manual/range-ohm-1ma", &page, false);
+    save1(out, "range-ohm-1ma");
+
+    // The nS range chosen on the range page.
+    host::reset(0);
+    ui::range_page(Button::Ohm, Some(9), 0, None);
+    ck.check_opts("manual/range-ohm-ns", &page, false);
+    save1(out, "range-ohm-ns");
+
     // Capacitance range page: 600 uF fixed.
     host::reset(0);
     ui::range_page(Button::Cap, Some(4), 0, None);
@@ -249,26 +264,6 @@ pub fn run(out: &str) -> usize {
     ]);
     ck.check_opts("manual/device", &page, false);
     save1(out, "device");
-
-    // Touch test page: taps on the targets (a scale error), MENU held.
-    host::reset(0);
-    super::touchtest_scene(2, false);
-    ck.check_opts("manual/touch-test", &[("screen", Bx::new(0, 0, 480, 320))], false);
-    save1(out, "touch-test");
-
-    // Touch calibration: the walk, the result of a good fit.
-    for (k, name) in [(0u8, "touch-cal"), (1, "touch-cal-result")] {
-        host::reset(0);
-        super::touchcal_scene(k, false);
-        ck.check_opts(&format!("manual/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
-        save1(out, name);
-    }
-
-    // On-screen help, page 1 (gestures).
-    host::reset(0);
-    ui::help_page(0);
-    ck.check_opts("manual/help", &page, false);
-    save1(out, "help");
 
     // Fuse check passed.
     {
@@ -339,6 +334,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
+        // The nS range: 2.15 nS (465 Mohm).
+        ("dmm-ohm-ns", Dp { rate: false, ..dp(Reading { range: dmm::OHMNS, auto: false, ..rd(10, val(2.15, 2, "nS"), None, None, false) }) }),
         // Capacitance: the discharge before 600 uF and up, and its warning
         // (the second only for the layout check).
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
@@ -435,7 +432,7 @@ pub fn run(out: &str) -> usize {
 
     // Generator: every waveform, the 50 kHz clamp, a DC output, the keypad.
     {
-        let g = |on, wave, freq_hz, amp_v, duty, offset_v| gen::Settings { on, wave, freq_hz, amp_v, duty, offset_v };
+        let g = |on, wave, freq_hz, amp_v, duty, offset_v| gen::Settings { on, wave, freq_hz, amp_v, duty, offset_v, ..gen::Settings::DEFAULT };
         let gen_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 36))];
         for (name, s, kp) in [
             ("gen-square", g(true, gen::Wave::Square, 1_000, 3.0, 2500, None), None),
@@ -453,6 +450,18 @@ pub fn run(out: &str) -> usize {
             }
             save1(out, name);
         }
+        // Modulation (owner 2026-11-21): AM on the page, the modulation page
+        // with FM (its deviation limited at a 45 kHz carrier).
+        let am = gen::Settings { modu: gen::Mod::Am, mod_hz: 100.0, am_depth: 50, ..g(true, gen::Wave::Sine, 10_000, 3.0, 5000, None) };
+        gen_page(am, None);
+        ck.check_opts("manual/gen-am", &gen_regions, false);
+        save1(out, "gen-am");
+        let mut gg = gen::Gen::new();
+        gg.apply(gen::Settings { modu: gen::Mod::Fm, mod_hz: 1000.0, fm_dev_hz: 8000.0, ..g(true, gen::Wave::Sine, 45_000, 3.0, 5000, None) });
+        host::reset(0);
+        ui::gen_mod_page(&gg);
+        ck.check_opts("manual/gen-mod", &page, false);
+        save1(out, "gen-mod");
     }
 
     // Wave view: mains on the 600 V range (its full-scale step, 150 V/div), triggered at 10 V,
@@ -570,6 +579,11 @@ pub fn run(out: &str) -> usize {
             p.ttype = 1;
             p.pcond = 0;
             p.pwidth = 400e-6;
+        });
+        // The frequency counter's reading, top right (Trigger > Counter).
+        add("scope-counter", &|s, p| {
+            s.m.ctr = scope_ui::Txt::new("1.00000kHz");
+            p.ctr = true;
         });
         add("scope-trig-runt", &|s, p| {
             s.m.runt_row = Some(60);

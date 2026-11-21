@@ -46,7 +46,7 @@ limitations](#known-limitations).
 9. [Inrush current](#inrush-current)
 10. [Recording](#recording): the Record page and the fast recorder.
 11. [USB disk, screenshots and the gallery](#usb-disk-screenshots-and-the-gallery)
-12. [Settings](#settings): every settings item, the Device page and the touch test.
+12. [Settings](#settings): every settings item and the Device page.
 13. [Remote control and connecting from a computer](#remote-control-and-connecting-from-a-computer):
     the phone app, USB and Bluetooth on Linux, Windows and macOS, sigrok.
 14. [Backup, recovery and back to stock](#backup-recovery-and-back-to-stock)
@@ -257,15 +257,6 @@ the combined view switches to the next sub-mode of the current function
 
 *The warning 30 s before the automatic power-off.*
 
-### On-screen help
-
-**Settings > Other > Help** opens two short help pages: gestures and side
-keys. Tap to turn the page.
-
-![The first help page: gestures](img/help.png)
-
-*The first help page: gestures.*
-
 ## What's new compared with the stock firmware
 
 opendm40 replaces the stock firmware V2.6. It keeps its look, its touch
@@ -428,13 +419,12 @@ lightning from 100 V). opendm40 adds:
 #### Other
 
 - A warning 30 s before the automatic power-off.
-- [On-screen help](#on-screen-help).
 - The [Device page](#the-device-page) shows the opendm40 version and the
   board temperature.
 
-![The power-off warning, the help, the Device page](img/new-other.png)
+![The power-off warning, the Device page](img/new-other.png)
 
-*The power-off warning, the help, the Device page.*
+*The power-off warning, the Device page.*
 
 #### What the stock firmware has and opendm40 does not
 
@@ -579,7 +569,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ (and an
-  experimental 600 MΩ, below). 60 Ω shows
+  experimental 600 MΩ and a 60 nS conductance range, below). 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
@@ -597,9 +587,32 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   Short-circuit currents, measured on one unit with the jacks shorted. The
   open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
+- **1.07 mA EXP** (experimental; on with **Settings > Other > Ohm 1.07
+  mA**): a third test current, the 0.90 mA source one step higher (1.07 mA
+  on 600 Ω and 60 Ω, 209 µA on 6 kΩ, 21 µA on 60 kΩ; 60 MΩ keeps its own).
+  The range page then shows three buttons, and a second tap on Ω steps
+  0.90 → 0.28 ON → 1.07 → 0.90 mA. The factory calibration is the same for
+  every test current and is not changed: the meter measures the ratio to
+  its reference resistor, so the reading does not depend on the current.
+  The label top left shows **EXP I 1.1 mA**. Switching the setting off
+  returns to 0.90 mA.
+
+  ![The range page with the 1.07 mA test current](img/range-ohm-1ma.png)
+
+  *The range page with the 1.07 mA test current.*
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **60nS** (range page, bottom row; never AUTO): conductance, the
+  reciprocal of resistance, for very high resistances: 60.00 nS = 16.7 MΩ,
+  1.00 nS = 1 GΩ, 0.01 nS = 100 GΩ. The same source and timing as 600 MΩ
+  (105 nA at most, a reading per ~2 s), no accuracy spec. A leakage across
+  the jacks (the meter's own, your leads, your fingers) adds to the
+  reading, so: leave the leads open, wait for a steady reading and press
+  **REL**; then connect the part. The leakage 600 MΩ has learned is already
+  taken off. Readings a little below 0 are noise. **0L** above 60 nS
+  (below 16.7 MΩ, or shorted leads). Over USB / Bluetooth the reading is in
+  siemens (`FUNC?` stays `RES`).
 - **Null** (range page, beside 600MΩ experimental): the resistance of your
   test leads, taken off every reading. Short the leads, wait for a steady
   reading, tap **Null**: the button shows the value (for example **Null
@@ -615,6 +628,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 | 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
 | ![412.3 MΩ on 600 MΩ](img/dmm-ohm-600m.png) | ![The range page with 600 MΩ chosen](img/range-ohm-600m.png) |
 | The experimental 600 MΩ: test current 105 nA | The range page with 600 MΩ chosen |
+| ![2.15 nS on 60 nS](img/dmm-ohm-ns.png) | ![The range page with 60 nS chosen](img/range-ohm-ns.png) |
+| 2.15 nS (465 MΩ) on 60 nS | The range page with 60 nS chosen |
 
 #### Continuity
 
@@ -815,8 +830,8 @@ while the input is steady (each time a 0.2 s pause in the readings). A
 reading in the first 2 s on a range can be a little off. FAST is a little
 noisier than MED; for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW 12.8 s;
-no extra digit on 60 Ω). After a step of the input or a range change the
+In Ω the averages are longer: 6.4 s in MED on every range, in SLOW
+12.8 s from 60 Ω to 60 kΩ and 6.4 s above (no extra digit on 60 Ω). After a step of the input or a range change the
 average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -835,9 +850,12 @@ average restarts, so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears after the main digits on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ, about 1.6 s (MED in
-DC) or 3.2 s (SLOW, and in Ω) after the input settles. Wherever it can
-appear, the reading starts further left, so the other digits never move.
+DC 600 mV, 6 V, 60 V, 600 V, every DC A, mA and µA range and every Ω range
+from 600 Ω to 60 MΩ, about 1.6 s (MED in DC V and A) or 3.2 s (MED in mA
+and µA, SLOW, and in Ω) after the input settles. From 600 kΩ mains hum and
+leakage dominate it (shielded leads help); on A it is 0.1 µV across the
+shunt, so the shunt's warming moves it. Wherever it
+can appear, the reading starts further left, so the other digits never move.
 
 #### Smoothing
 
@@ -1334,7 +1352,11 @@ in the left or right half of the graph steps), **Off**.
 - Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
-    readings, not the hardware.
+    readings, not the hardware. **Type**: **Vol** (volts) or **Cur**
+    (amperes, for a current probe or shunt: the probe factor then means
+    amperes per volt at the input, so ×10 reads a 100 mV/A clamp). With
+    **Cur** the CH1 V/div, the trigger level, the measurements, the cursors
+    and the CSV are in A (Ip-p, Imax ...). Kept over a restart.
   - **Color** of the trace (the stock nine and cyan; MATH's the same).
 - Tap the **CH1** title again with the popup open to hide CH1: no trace and
   no **A** marker, the block dimmed. CH1 is still recorded, so the trigger
@@ -1376,6 +1398,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
 | **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
+| **Counter** | **Off**, **On**: a 6-digit frequency counter on CH1, top right in the graph. |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1392,6 +1415,23 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 
 The edge trigger uses the trigger hardware where it can, so it does not miss
 edges between captures.
+
+**Counter On** shows CH1's frequency with 6 digits in the top right corner
+of the graph ("1.00000kHz"), a new value 4 times a second. It counts the
+trigger hardware's edges: where CH1 crosses the trigger level, on the
+trigger edge, so set the level inside the signal (a long press on the T
+marker puts it in the middle). It measures the time between the first and
+the last edge of each quarter second to 5 ns, so it has 6 digits from below
+1 Hz to the top of the input's bandwidth, unlike **Freq** in the
+measurements (one capture). No edges for 2 s: "------Hz". While the counter
+is on, the trigger hardware is the counter's: the edge trigger is searched in
+the samples (as at **Source GEN** / **DMM**), so an edge between two
+captures can be missed. Not in the Wave view. Noise around the level can
+add edges: a slow, noisy signal reads high.
+
+![The frequency counter, top right](img/scope-counter.png)
+
+*The frequency counter, top right.*
 
 **Source GEN** triggers on the generator without a wire: the meter knows
 from the generator's timers when its output crosses the trigger level, and
@@ -1561,8 +1601,44 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 ### Display settings
 
-**MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**MF > Display**: **Roll** on / off; **Hi-res** on / off; **Persist** OFF,
+MIN, 1S, INF, DPO, HOT; **Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**Hi-res** draws the mean of the samples in each screen column instead of
+the band from their smallest to their largest: less noise on the trace, the
+more samples a column has (2 or more; not in roll). From 50 µs/div a column
+holds about 62 samples, up to 3 bits more resolution when the signal
+carries some noise; 20 µs/div 25, 10 µs/div 12, 1 µs/div and faster almost
+none. The mean keeps its fraction, so a vertically stretched trace is
+smooth, not in code steps. The level measurements (Vmax, Vmin, Vpp, Vtop,
+Vbas, Vamp, Vrms) are then those of the averaged signal, without the noise;
+Freq, the widths and the duty still use every sample, and a clipped sample
+still shows `--` for Vpp. The averaging lowers the bandwidth (about
+180 kHz at 100 µs/div) and a spike shorter than a column is averaged
+away, so switch it off to look for glitches. The CSV is not changed by it.
+
+**Wide graph.** A swipe right on the right panel hides it: the graph's 10
+divisions stretch over the whole screen and the measurement bar gets a 5th
+cell. A swipe left from the screen's right edge brings the panel back (a
+press on the trigger level marker there still drags it). The combined view
+keeps the panel; the setting is not kept over a restart. MF > Measure takes
+up to 5 items; the normal bar shows the first 4.
+
+**Persist DPO / HOT** (digital phosphor) draws CH1 as a hit count per cell of
+1 column x 4 rows: bright where the trace runs in most frames, dim where it
+went once in a while (jitter, noise, a rare runt). The brightness follows
+the count on a log scale, so a single hit shows next to a trace hit in every
+frame. **DPO** uses CH1's colour in 15 brightness steps, **HOT** blue
+(rare) through green, yellow and orange to white (always). The **- / +**
+next to **Persist:** (shown with DPO / HOT) sets how fast a trace that is
+gone fades: **0.3s**, **1s** (default), **3s**, **10s** or **INF** (never).
+On the fast timebases every
+triggered screen of a record is added, not only the shown one, so a rare
+event appears at once. A drag, a pinch, a settings change, roll and STOP
+show the plain trace and start the count over. While DPO / HOT is on the
+scope record is 14 K samples shorter (29 K; 44 220 on the slow timebases):
+the counts use the end of its memory. Roll and the other Persist settings
+have the whole record.
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan (**Color** beside it, a tap: the next one) under CH1, on CH1's position and its own V/div (the **GEN** block's
@@ -1581,6 +1657,12 @@ measurements. Its zero line has a **2** marker on the left: drag
 it up or down to move the trace (double tap: back to the centre); the
 position is kept in the settings. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
+**V** / **A** choice beside **On** / **Off** on the Display tab sets CH2's
+unit and puts the multimeter into that function (V, or AC A) in one tap: V
+and A keep their last DC / AC coupling, except AC+DC and AUTO, which CH2
+cannot stream (V goes to DC, A to AC), and the power meter is left. Neither is
+selected while the multimeter is in another function. It does nothing in the
+Wave view or while a recording runs. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
@@ -1601,6 +1683,13 @@ While it is on, the edge trigger does not use the trigger hardware.
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Zero cal**: calibrates the scope's zero. The probe can stay where it
+  is: the scope switches to AC coupling, which keeps the probe's DC out, and
+  measures each hardware range in turn (about 15 s, the screen holds still
+  meanwhile). The correction applies in AC and DC and is kept over a
+  restart. A large AC signal on the input stops it with **Zero cal: signal
+  too large**; repeat it with the probe disconnected or shorted. Your scope
+  settings come back afterwards; **Zero calibrated** when done.
 - **Decode**: the [protocol decoder](#protocol-decoder).
 
 
@@ -1611,7 +1700,7 @@ While it is on, the edge trigger does not use the trigger hardware.
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+the probe tip (with CH1 type **Cur**: `time_s,amperes`, amperes). A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
@@ -1811,7 +1900,8 @@ an external voltage can destroy the output.
 
 - Top bar: **RUN** (green, output on) or **STOP**, the time since power-on,
   lock, Bluetooth, battery.
-- Left: the waveform box with a preview of two periods.
+- Left: the waveform box with a preview of two periods, under it the
+  [modulation](#modulation) box.
 - Right: **Frequency**, **Vpp**, **Offset**, **Duty**.
 
 To use it:
@@ -1875,6 +1965,44 @@ set as on the stock firmware: square, 2 MHz, 3 Vpp.
 
 *Offset auto, a set offset, a DC output.*
 
+### Modulation
+
+The box under the preview shows the modulation: **Mod: Off**, or for
+example **AM 100.00Hz 50%** / **FM 1000.00Hz 5000Hz**. Tap it to open the
+**Modulation** page:
+
+| Row | What it does |
+|---|---|
+| **Modulation** | Tap to step **Off → AM → FM**. |
+| **Mod frequency** | The modulating sine, Hz (0.1 .. 25000). |
+| **AM depth** | 0 .. 100 %. At 100 % the envelope goes down to the centre level. |
+| **FM deviation** | Peak deviation from the carrier, Hz. |
+
+**< Back** or **MENU** return to the generator page; **RUN** switches the
+output on or off here too.
+
+- The carrier is the waveform and frequency of the generator page (sine,
+  square, triangle or ramp, up to 50 kHz). A square above 50 kHz runs on the
+  logic-level path and cannot be modulated: the box shows **n/a above 50k**.
+- AM keeps the peaks within the set Vpp and offset: at 50 % the carrier
+  swings between a third of the Vpp and the full Vpp.
+- FM: the deviation is limited to the carrier frequency and to what keeps
+  carrier + deviation within 50 kHz; the page then shows the deviation used
+  in brackets, for example **8000 Hz (5000)**.
+- The output plays one modulation period from its table, which holds a
+  whole number of carrier periods, at most 100 (20 samples per carrier
+  period). So the modulation frequency is the carrier divided by a whole
+  number, and at least carrier / 100: 10 kHz modulated at 10 Hz runs at
+  100 Hz. The box then shows the real modulation frequency in orange and
+  the page shows it in brackets.
+- The scope's GEN channel shows nothing while the output is modulated
+  (connect OUT to CH1 to see it).
+- Kept over a power-off.
+
+| ![AM: 10 kHz sine, 100 Hz, 50 %](img/gen-am.png) | ![The Modulation page, FM with the deviation limited](img/gen-mod.png) |
+|---|---|
+| AM: 10 kHz sine, 100 Hz, 50 % | The Modulation page: FM at 45 kHz, the deviation limited to 5 kHz |
+
 ### The keypad
 
 Tap a value box. The keypad opens with the current value selected:
@@ -1883,7 +2011,7 @@ Tap a value box. The keypad opens with the current value selected:
   after that **<** deletes the last character;
 - frequency: type whole numbers and choose the unit with **H** (Hz),
   **K** (kHz) or **M** (MHz). To get 32.768 kHz, type `32768` and **H**;
-- Vpp, offset and duty: digits and a decimal point;
+- Vpp, offset, duty and the modulation values: digits and a decimal point;
 - **OK** applies; a tap outside the keypad cancels.
 
 
@@ -2295,8 +2423,8 @@ Set in **Settings > Other > USB disk**.
   read-only.
 
 A change of the mode takes effect at the next USB plug: unplug the cable
-and plug it in again. Until then the row shows **(replug)**. The meter
-always starts in **Files live**.
+and plug it in again. Until then the row shows **(replug)**. The mode is
+kept over a restart: the meter starts in the mode it was left in.
 
 A file manager usually moves a deleted file to the trash. A file moved to
 the trash is deleted on the meter at the eject, unless you take it out of
@@ -2469,10 +2597,9 @@ goes back to the main menu.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
-| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
+| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Kept over a restart. |
+| **Ohm 1.07 mA** | ON (exp), OFF | OFF | Experimental: a third ohm test current, [1.07 mA](#resistance). |
 | **Device info** | | | Opens the [Device page](#the-device-page). |
-| **Touch test** | | | The [touch test page](#touch-test). |
-| **Help** | | | The [on-screen help](#on-screen-help). |
 
 ### The Device page
 
@@ -2493,85 +2620,6 @@ goes back to the main menu.
 | Board temp | The temperature of the main chip, as a rough indication |
 
 Tap anywhere to go back to Settings; **MENU** goes to the main menu.
-
-### Touch test
-
-**Settings > Other > Touch test** shows what the touch screen
-reports, to check where a tap lands:
-
-![The touch test page](img/touch-test.png)
-
-*The touch test page: taps on the targets, MENU held.*
-
-| On the page | What it shows |
-|---|---|
-| Crosses (grey) | Nine targets: the corners 20 px in, the middle of each edge, the centre. |
-| Orange dots | Every point the touch screen reports. |
-| Green dots | The points the meter accepts as a touch (after filtering out short contacts and bounce), moved by the [touch calibration](#touch-calibration) if there is one. |
-| Red cross | Where a touch started: where a tap lands. |
-| **Raw** | The last reported point and how many fingers it had. |
-| **Tap**, **Off** | Where the last touch started, and how far that is from the nearest target (`+` = right of / below it). |
-| **Frames**, **max** | Reports read since the page opened; the most fingers in one report. |
-| **Stale**, **Bad** | Reads that found no new report, and reads that failed. |
-| MENU, RUN, AUTO, MF | The four touch keys: a box lights up while the touch screen reports its key; `x` is the reported position along the key strip. |
-| **Cal** (small text) | The touch calibration in use: `none (stock)`, or its two equations (below). |
-
-Touch every target and compare the red crosses with them. The touch keys
-do nothing on this page.
-
-- **Clear**: tap it to clear the dots.
-- To leave the page, press the power key, or hold one finger still
-  anywhere for 2 s. Both go back to Settings, the Other tab.
-
-#### Touch calibration
-
-If the green dots land beside the targets, **Calibrate** on the touch test
-page fits a correction for this meter's touch screen. Without a
-calibration the meter uses the touch screen's points unchanged, as the
-stock firmware does.
-
-![The touch calibration walk](img/touch-cal.png)
-
-*The walk: the fifth target, after a second tap that was refused.*
-
-![The touch calibration result](img/touch-cal-result.png)
-
-*The result: the taps (orange) and where the correction moves them
-(green).*
-
-1. Tap **Calibrate**. One target at a time turns yellow.
-2. Tap the yellow cross twice, with a short still tap each time. The
-   line under the centre says what is wrong with a tap that is not taken:
-   - **Too far from the cross**: the tap was more than 60 px away.
-   - **Taps differ: tap again**: the two taps of one target were more
-     than 30 px apart; both taps of that target are asked again.
-   - **Moved: tap again**: the finger slid during the tap.
-3. After the ninth target the result shows:
-
-   | Line | What it shows |
-   |---|---|
-   | **Fit error** | How far the corrected taps are from their targets, mean and largest. What is left is mostly the scatter of the finger. |
-   | **Before** | The mean distance of the taps from their targets without a correction. |
-   | **x' =**, **y' =** | The correction: the point the meter uses (x', y') from the point the touch screen reports (x, y). |
-
-4. **Save** applies the correction at once and keeps it in the settings
-   (also across a power-off). **Cancel** keeps the calibration as it was.
-
-The result offers **Try again** instead of **Save** when the correction
-looks wrong: a scale outside 0.85..1.15, a shift of more than 40 px at a
-target, or a tap more than 25 px from where the correction puts it.
-
-**Reset** on the walk's screen removes the calibration (the stock
-behaviour). During the walk and on the result, holding a finger does not
-leave the page; the power key does, without changing the calibration.
-
-The touch keys (MENU, RUN, AUTO, MF) are not affected by the calibration.
-Over USB, `DBG:TOUCH:CAL?` reads the calibration and `DBG:TOUCH:CAL RESET`
-removes it ([SCPI reference](scpi-reference.md#debug-commands)).
-
-The page does not open during a [fast recording](#fast-recording) or while
-the `LOG:` commands stream readings to a computer
-([other ways to log](#other-ways-to-log)), and closes when one starts.
 
 ## Remote control and connecting from a computer
 
@@ -2981,7 +3029,7 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
+| All [settings](#settings), **USB disk** included; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
 | Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep; the scope's probe factor | Scope: the timebase, V/div, coupling, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |

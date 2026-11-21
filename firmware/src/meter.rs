@@ -439,6 +439,12 @@ pub const EXT_TREND_SHIFT: u32 = 21;
 pub const EXT_RANGE_SHIFT: u32 = 24;
 /// p[38] bit 28: the continuity beeper with the volume (0 = always: older records).
 pub const EXT_CONT_VOL: u32 = 1 << 28;
+/// p[38] bit 30: the experimental 1.07 mA ohm test current available
+/// (Settings > Other "Ohm 1.07 mA"; 0 = off: older records).
+pub const EXT_OHM_1MA: u32 = 1 << 30;
+/// p[38] bit 29: the USB disk starts writable, "PC can edit" (opendm40
+/// fork, owner 2026-11-12; 0 = Files live: older records).
+pub const EXT_USB_RW: u32 = 1 << 29;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -708,7 +714,6 @@ impl Meter {
 
     /// Readout state for the status label: 0 RUN, 1 HOLD (manual), 2
     /// AutoHold waiting / tracking, 3 AutoHold showing a captured value.
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn hold_state(&self) -> u8 {
         if self.hold {
             1
@@ -921,7 +926,6 @@ impl Meter {
         }
     }
 
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn rel_off(&mut self) {
         if self.rel.take().is_some() {
             self.ah_held = None;

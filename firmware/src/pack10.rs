@@ -225,6 +225,23 @@ impl Codes {
         (o + w.len <= self.len).then_some(o)
     }
 
+    /// The mean code of a .. b, rounded (512 when empty): the scope's
+    /// Hi-res columns.
+    #[inline(never)]
+    /// The mean code of a .. b with its fraction (Hi-res: the trace keeps
+    /// the sub-code steps the averaging gives, owner 2026-11-20).
+    pub fn mean(&self, a: usize, b: usize) -> f32 {
+        let b = b.min(self.len);
+        if a >= b {
+            return 512.0;
+        }
+        let mut s = 0u32;
+        for i in a..b {
+            s += self.at(i) as u32;
+        }
+        s as f32 / (b - a) as f32
+    }
+
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).
     #[inline(never)]
     pub fn min_max(&self, a: usize, b: usize) -> (u16, u16) {

@@ -43,14 +43,27 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v10: 64 words; p[62..64] W_LIM_W, the power meter's W limits (lower /
 /// upper, f32 bits; their on / set bits are bit 17 of p[18] and bits 9 / 25
 /// of p[19], 0 in older records = off / unset).
-/// v11: 70 words; p[64..70] W_TOUCH_CAL, the touch calibration
-/// (touchcal.rs Cal: Q16 deltas from the identity; 0 = none, so v10 loads
-/// zero-extended as the identity).
-pub const VERSION: u32 = 11;
-pub const WORDS: usize = 70;
+/// v11: 70 words; p[64..70] the touch calibration (Q16 deltas from the
+/// identity; 0 = none). Since 0.4.25 the calibration is gone (owner
+/// 2026-11-20): the words are written 0 and ignored on load (W_TOUCH_CAL,
+/// reserved), so the layout and VERSION stay.
+/// v12: 73 words; p[70..73] W_SCOPE_ZERO, the scope's zero calibration
+/// (scope::zero_trim, ten i8 half codes; 0 = none, v11 loads zero-extended).
+pub const VERSION: u32 = 12;
+pub const WORDS: usize = 73;
+const V11_WORDS: usize = 70;
+/// The scope's zero calibration (3 words; a preference).
+pub const W_SCOPE_ZERO: usize = 70;
 const V10_WORDS: usize = 64;
-/// The touch calibration (6 words, touchcal::Cal; a preference).
+/// The removed touch calibration's 6 words (64..70), written 0 since
+/// 0.4.25. Since 0.4.26 the first three hold the generator's modulation
+/// (W_GEN_MOD: p[64] = GEN_MOD_TAG << 24 | mode | AM depth << 8, p[65] the
+/// modulation frequency, p[66] the FM deviation, f32 bits); without the tag
+/// (zeros, or an old calibration) the modulation stays off.
+#[allow(dead_code)]
 pub const W_TOUCH_CAL: usize = 64;
+pub const W_GEN_MOD: usize = 64;
+pub const GEN_MOD_TAG: u32 = 0xA5;
 const V9_WORDS: usize = 62;
 /// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
 pub const W_LIM_W: usize = 62;
@@ -106,6 +119,7 @@ const V2_WORDS: usize = 16;
 pub fn words_of(version: u32) -> Option<usize> {
     Some(match version {
         VERSION => WORDS,
+        11 => V11_WORDS,
         10 => V10_WORDS,
         9 => V9_WORDS,
         8 => V8_WORDS,

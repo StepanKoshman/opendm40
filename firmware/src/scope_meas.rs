@@ -31,6 +31,9 @@ pub const ITEMS: [(u8, &str, Unit); 20] = [
 
 /// Default selection (stock 0x0804c6ac): Freq, Vpp, Cycl, Vrms.
 pub const DEFAULT_SEL: [u8; 4] = [0, 10, 9, 11];
+/// Selected items at most: 5 (opendm40: the wide graph's bar has a 5th
+/// cell; the normal bar shows the first 4).
+pub const MAX_SEL: usize = 5;
 
 /// A selected item measures the DMM channel (CH2): this flag on its stock
 /// id (`App::meas_sel`; the settings word keeps it, 8 bits per item).
@@ -79,12 +82,16 @@ fn sqrt(x: f32) -> f32 {
 
 use crate::pack10::Src;
 
-pub fn compute<S: Src + ?Sized>(d: &S, fs: f32, sc: &Scope) -> Results {
+/// `hires`: MF > Display > Hi-res on: the levels come from the means of
+/// the samples one screen column covers (`compute_codes` `k`), as the trace.
+pub fn compute<S: Src + ?Sized>(d: &S, fs: f32, sc: &Scope, hires: bool) -> Results {
     // Volts are linear in the code: precompute instead of calling the
     // calibrated map per sample (that made a 50k-sample frame take ~100 ms).
     let v_0 = sc.volts(0.0);
     let v_k = sc.volts(1.0) - v_0;
-    compute_codes(d, fs, v_0, v_k)
+    // (400 = scope::COLS; the host tests have no scope module)
+    let k = if hires { d.len() / 400 } else { 1 };
+    compute_codes(d, fs, v_0, v_k, k)
 }
 
 /// Sum of (v_0 + v_k c)^2 over `n` samples with code sum `s1` and code
@@ -102,7 +109,14 @@ fn sum_sq(n: u32, s1: u64, s2: u64, v_0: f32, v_k: f32) -> f64 {
 /// thresholds, then whole-cycle duty and the integer moments of Vcrm. The
 /// sums are exact (integer moments, combined in f64), so the values match
 /// the old f32 running sums to their rounding.
-pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32) -> Results {
+///
+/// Hi-res (`k` >= 2, owner 2026-11-20): the histogram holds the means of
+/// consecutive blocks of `k` samples (each counted k times), so Vmax / Vmin
+/// / Vpp / Vtop / Vbas / Vamp / Vrms are those of the averaged signal (the
+/// noise out, as a hi-res scope's) and the edge levels follow from them; the
+/// edges, Freq and the duty still look at every sample (their timing), and
+/// a clipped sample still voids Vpp / Vamp. `k` 0 / 1: every sample.
+pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32, k: usize) -> Results {
     let mut r = Results { v: [f32::NAN; 20] };
     let n = d.len();
     if n < 4 {
@@ -110,9 +124,24 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32) -> Res
     }
     let volts = |c: f32| v_0 + v_k * c;
     let mut hist = [0u16; 1024];
-    for i in 0..n {
-        let c = d.at(i).min(1023) as usize;
-        hist[c] = hist[c].saturating_add(1);
+    let (mut rlo, mut rhi) = (1023u16, 0u16);
+    if k >= 2 {
+        for j in 0..n / k {
+            let mut s = 0u32;
+            for i in j * k..(j + 1) * k {
+                let c = d.at(i).min(1023);
+                rlo = rlo.min(c);
+                rhi = rhi.max(c);
+                s += c as u32;
+            }
+            let c = ((s + k as u32 / 2) / k as u32) as usize;
+            hist[c] = hist[c].saturating_add(k as u16);
+        }
+    } else {
+        for i in 0..n {
+            let c = d.at(i).min(1023) as usize;
+            hist[c] = hist[c].saturating_add(1);
+        }
     }
     let (mut lo, mut hi) = (1023u16, 0u16);
     let (mut s1, mut s2) = (0u64, 0u64);
@@ -127,9 +156,13 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32) -> Res
     let (vmax, vmin) = (volts(hi as f32), volts(lo as f32));
     r.v[12] = vmax;
     r.v[13] = vmin;
-    r.v[19] = ((v_0 as f64 * n as f64 + v_k as f64 * s1 as f64) / n as f64) as f32;
-    r.v[11] = sqrt((sum_sq(n as u32, s1, s2, v_0, v_k) / n as f64) as f32);
-    let clipped = lo == 0 || hi >= 1023;
+    // The moments over what the histogram holds (Hi-res: whole blocks only;
+    // the count must match s1 / s2, a large offset v_0 cancels in them).
+    let nh = if k >= 2 { n / k * k } else { n };
+    r.v[19] = ((v_0 as f64 * nh as f64 + v_k as f64 * s1 as f64) / nh as f64) as f32;
+    r.v[11] = sqrt((sum_sq(nh as u32, s1, s2, v_0, v_k) / nh as f64) as f32);
+    let (rlo, rhi) = if k >= 2 { (rlo, rhi) } else { (lo, hi) };
+    let clipped = rlo == 0 || rhi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };
     // Top / base: most populated bin in the upper / lower 30 % band, when
     // it is a plateau: the band's best three-bin window holds at least 4x
@@ -159,7 +192,7 @@ pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32) -> Res
     let (vtop, vbas) = (volts(tb as f32), volts(bb as f32));
     r.v[14] = vtop;
     r.v[15] = vbas;
-    r.v[16] = if bb == 0 || tb == 1023 { f32::NAN } else { vtop - vbas };
+    r.v[16] = if bb == 0 || tb == 1023 || clipped && k >= 2 { f32::NAN } else { vtop - vbas };
     // Edge analysis on codes: 10 / 50 / 90 % of base..top.
     if tb > bb + 4 {
         let span = (tb - bb) as f32;

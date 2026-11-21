@@ -77,7 +77,7 @@ mod meas {
         // A rise at sample 0 (no level before it) and one at 480 (past the
         // end), one inside at 240: the falls (120, 360) give the period.
         let d = square(480, 9600.0, 40.0, 0.0);
-        let r = compute_codes(&d, 9600.0, 0.0, 0.01);
+        let r = compute_codes(&d, 9600.0, 0.0, 0.01, 1);
         assert!((r.v[0] - 40.0).abs() < 0.2, "Freq {}", r.v[0]);
         assert!((r.v[9] - 0.025).abs() < 1e-4, "Cycl {}", r.v[9]);
         assert!((r.v[1] - 50.0).abs() < 1.0, "duty {}", r.v[1]);
@@ -101,7 +101,7 @@ mod meas {
     fn triangle_and_ramp_top_base_are_the_extremes() {
         for (ramp, n, fs, f) in [(false, 25_000, 12.5e6, 2000.0), (true, 25_000, 12.5e6, 1000.0), (false, 400, 4000.0, 30.0), (true, 2048, 1e5, 210.0)] {
             let d = tri(n, fs, f, 300.0, 727.0, ramp);
-            let r = compute_codes(&d, fs, 0.0, 0.01);
+            let r = compute_codes(&d, fs, 0.0, 0.01, 1);
             let what = if ramp { "ramp" } else { "triangle" };
             assert!((r.v[14] - 7.27).abs() < 0.011 && (r.v[15] - 3.0).abs() < 0.011, "{what} {n}: Vtop {} Vbas {}", r.v[14], r.v[15]);
             assert!((r.v[16] - r.v[10]).abs() < 1e-4, "{what} {n}: Vamp {} Vpp {}", r.v[16], r.v[10]);
@@ -125,7 +125,7 @@ mod meas {
                     (base + spike + noise(i)) as u16
                 })
                 .collect();
-            let r = compute_codes(&d, 1e6, 0.0, 0.01);
+            let r = compute_codes(&d, 1e6, 0.0, 0.01, 1);
             assert!((r.v[14] - 8.0).abs() <= 0.021 && (r.v[15] - 2.0).abs() <= 0.021, "duty {duty}: Vtop {} Vbas {}", r.v[14], r.v[15]);
             assert!((r.v[1] - duty * 100.0).abs() < 1.0, "duty {duty}: +Duty {}", r.v[1]);
         }
@@ -148,25 +148,52 @@ mod meas {
                         (base + spike + noise(i)) as u16
                     })
                     .collect();
-                let r = compute_codes(&d, 1e6, 0.0, 0.01);
+                let r = compute_codes(&d, 1e6, 0.0, 0.01, 1);
                 let (top, bas) = ((r.v[14] * 100.0).round() as i32, (r.v[15] * 100.0).round() as i32);
                 assert!((500 + amp..=502 + amp).contains(&top) && (500..=502).contains(&bas),
                     "amp {amp} duty {duty}: Vtop code {top} Vbas code {bas} (Vmax {} Vmin {})", r.v[12] * 100.0, r.v[13] * 100.0);
             }
         }
         let d = tri(25_000, 12.5e6, 2000.0, 500.0, 540.0, false);
-        let r = compute_codes(&d, 12.5e6, 0.0, 0.01);
+        let r = compute_codes(&d, 12.5e6, 0.0, 0.01, 1);
         assert!(r.v[14] == r.v[12] && r.v[15] == r.v[13], "triangle 40 codes: Vtop {} Vbas {}", r.v[14], r.v[15]);
     }
 
     #[test]
     fn rises_preferred_and_one_edge_is_none() {
         let d = square(4800, 9600.0, 40.0, 0.25);
-        let r = compute_codes(&d, 9600.0, 0.0, 0.01);
+        let r = compute_codes(&d, 9600.0, 0.0, 0.01, 1);
         assert!((r.v[0] - 40.0).abs() < 0.05, "Freq {}", r.v[0]);
         // Less than a period with one rise and one fall: no frequency.
         let d = square(200, 9600.0, 40.0, 0.25);
-        assert!(compute_codes(&d, 9600.0, 0.0, 0.01).v[0].is_nan());
+        assert!(compute_codes(&d, 9600.0, 0.0, 0.01, 1).v[0].is_nan());
+    }
+
+    #[test]
+    fn hires_levels_from_block_means() {
+        // A 1 kHz square 400 .. 600 codes with +-6 codes of noise, 25 000
+        // samples at 12.5 MS/s (k = 62 per screen column): Hi-res Vpp is the
+        // square's 200 codes within 2, the plain one carries the noise.
+        let mut seed = 7u32;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            (seed >> 16) as i32 % 13 - 6
+        };
+        let d: Vec<u16> = (0..25_000).map(|i| (if (i / 6250) % 2 == 0 { 600 } else { 400 } + noise()) as u16).collect();
+        let raw = compute_codes(&d, 12.5e6, 0.0, 0.01, 1);
+        let hr = compute_codes(&d, 12.5e6, 0.0, 0.01, 25_000 / 400);
+        assert!(raw.v[10] * 100.0 > 210.0, "plain Vpp {}", raw.v[10] * 100.0);
+        assert!((hr.v[10] * 100.0 - 200.0).abs() <= 2.0, "hi-res Vpp {}", hr.v[10] * 100.0);
+        assert!((hr.v[0] - raw.v[0]).abs() < 1.0, "Freq hi-res {} plain {}", hr.v[0], raw.v[0]);
+        assert!((hr.v[19] - raw.v[19]).abs() < 0.01, "Vavg");
+        // Vrms with a large offset (v_0 = -5.12 V, AC around 0 V): the
+        // hi-res moments count whole blocks only (25 000 / 62 leaves 14).
+        let (ra, hb) = (compute_codes(&d, 12.5e6, -5.0, 0.01, 1), compute_codes(&d, 12.5e6, -5.0, 0.01, 62));
+        assert!((hb.v[11] - 1.0).abs() < 0.01 && hb.v[11] <= ra.v[11] + 1e-4, "Vrms hi-res {} plain {}", hb.v[11], ra.v[11]);
+        // One clipped sample (1023) voids Vpp also in hi-res.
+        let mut c = d.clone();
+        c[100] = 1023;
+        assert!(compute_codes(&c, 12.5e6, 0.0, 0.01, 62).v[10].is_nan());
     }
 }
 
