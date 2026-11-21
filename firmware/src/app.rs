@@ -2429,6 +2429,7 @@ impl App {
     /// measurements (owner 2026-11-02). Not AutoHold, the limits, REL or
     /// HOLD (as the stock: they change what the readout shows, unnoticed
     /// after a power-on), nor the power meter's settings or the Record page.
+    #[inline(never)] // .cold (link-native.x): start-up only (App::new)
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;

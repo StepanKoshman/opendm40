@@ -718,19 +718,13 @@ const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
 /// (docs/data/short.csv). The measurement is a ratio against Rref, so the
 /// factory calibration (per range, the same for every variant: the stock
 /// "ON" rows use it too) applies unchanged; nothing is written to it. r6
-/// (the current-source row) keeps its own.
-const fn vds16(mut c: [u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
+/// (the current-source row) keeps its own. Built in `write_config` (no
+/// table in region B's rodata).
+fn ohm_1ma_row(r: usize) -> [u8; hy::CFG_LEN] {
+    let mut c = if r == 0 { OHM_R0_ROW } else { CFG_F10_P8CLR[r.min(5)] };
     c[0x11] = (c[0x11] & 0xF0) | 1;
     c
 }
-const OHM_1MA: [[u8; hy::CFG_LEN]; 6] = [
-    vds16(OHM_R0_ROW),
-    vds16(CFG_F10_P8CLR[1]),
-    vds16(CFG_F10_P8CLR[2]),
-    vds16(CFG_F10_P8CLR[3]),
-    vds16(CFG_F10_P8CLR[4]),
-    vds16(CFG_F10_P8CLR[5]),
-];
 
 // Ohm r7: the experimental 600 Mohm range (firmware/docs/ohm-600m.md). Manual
 // only: the autorange, the AUTO key's short-press range steps and a restored
@@ -1003,7 +997,7 @@ fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
 /// `Dmm::write_config`) = r1's default value, inferred: its own row has the
 /// same tap and Rref switches but was not measured. r6 (60 M, the
 /// current-source row): not measured, None.
-/// Third column: the experimental 1.07 mA variant (`ohm_var` 2, `OHM_1MA`:
+/// Third column: the experimental 1.07 mA variant (`ohm_var` 2, `ohm_1ma_row`:
 /// VDS16, docs/data/short.csv VDS16 rows; r0 as r1).
 pub const OHM_ISC: [[Option<f32>; 3]; 7] = [
     [Some(8.983e-4), Some(8.983e-4), Some(1.069e-3)],
@@ -2148,7 +2142,7 @@ pub struct Dmm {
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
     /// Settings > Other "Ohm 1.07 mA" (experimental): the third test current
-    /// (`ohm_var` 2, `OHM_1MA`) on the range page and in the ohm button's
+    /// (`ohm_var` 2, `ohm_1ma_row`) on the range page and in the ohm button's
     /// cycle.
     pub ohm_1ma: bool,
     /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..31 in
@@ -2832,7 +2826,7 @@ impl Dmm {
     /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
     /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
-        // 2: the experimental 1.07 mA (`OHM_1MA`), only while enabled.
+        // 2: the experimental 1.07 mA (`ohm_1ma_row`), only while enabled.
         self.ohm_var = if v == 2 && self.ohm_1ma { 2 } else { v & 1 };
         // 600 Mohm has its own source: the variant waits for the next range
         // (no row rewrite, no restart of its phases).
@@ -3075,6 +3069,8 @@ impl Dmm {
         }
         let m = self.mode;
         let r = self.range.max(0) as usize;
+        // The 1.07 mA variant's row (`ohm_1ma_row`), built here.
+        let row1ma;
         let cfg: &[u8; hy::CFG_LEN] = match m {
             0 => &CFG_F0[r.min(3)],
             1 => &CFG_F1[r.min(3)],
@@ -3090,7 +3086,8 @@ impl Dmm {
                     self.o6.restart();
                     &OHM600_ROW
                 } else if self.ohm_var == 2 && r <= 5 {
-                    &OHM_1MA[r]
+                    row1ma = ohm_1ma_row(r);
+                    &row1ma
                 } else if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
@@ -8476,8 +8473,9 @@ mod tests {
         for r in 0..6 {
             let base = if r == 0 { OHM_R0_ROW } else { CFG_F10_P8CLR[r] };
             assert_eq!(base[0x11] & 0x0F, 2, "r{r}: VDS15");
-            assert_eq!(OHM_1MA[r][0x11] & 0x0F, 1, "r{r}: VDS16");
-            let d: Vec<usize> = (0..hy::CFG_LEN).filter(|&i| OHM_1MA[r][i] != base[i]).collect();
+            let row = ohm_1ma_row(r);
+            assert_eq!(row[0x11] & 0x0F, 1, "r{r}: VDS16");
+            let d: Vec<usize> = (0..hy::CFG_LEN).filter(|&i| row[i] != base[i]).collect();
             assert_eq!(d, vec![0x11], "r{r}");
         }
         assert_eq!(ohm_test_current(1, 2), Some(1.069e-3));
