@@ -33,6 +33,14 @@ official opendm40 release.
   gives DC V its sixth digit now runs on current too (MED: 1.6 s in A,
   3.2 s in mA / µA; SLOW: 6.4 s). In 0.4.24 it was switched on but the
   current path dropped the flag, so the digit never showed.
+- **DMM: faster autorange** (owner). DC V / mV, DC A and AC V step down
+  straight to the range one-at-a-time steps would end on (1 V after 600 V:
+  one change instead of two), with the same thresholds. DC V / mV steps up
+  the same way; when the converter clips (the value unknown) it goes to the
+  top range and picks the right one from there. Ω steps one range at a
+  time only for the first conversion after entering Ω (was 2.5 s), then by
+  as many ranges as the reading says. AC+DC, AC mV / A and the up steps of
+  current are unchanged.
 
 ### Removed
 
@@ -46,7 +54,8 @@ official opendm40 release.
 на экране (Settings > Other > Help) удалены, чтобы освободить память. На токе (DC A, mA, µA)
 появился шестой разряд, как на вольтметре. Новый диапазон проводимости 60 nS
 (страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
-(поле под предпросмотром).
+(поле под предпросмотром). Автовыбор диапазона быстрее: DC V / mV, DC A, AC V и Ω
+переходят сразу на нужный диапазон, а не по одному.
 
 ## v0.4.25-S2084 (2026-11-20)
 

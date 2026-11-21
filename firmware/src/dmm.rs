@@ -1266,6 +1266,24 @@ fn hypot(a: f32, b: f32) -> f32 {
 /// a pure AC 1 A on the A shunt read hypot(0, ~0) in the DC phase and could
 /// walk down onto the mA / uA shunt (47.5 ohm) with 1 A flowing; 230 V AC
 /// into the 6 V / mV range the same way. Up-ranges never wait.
+/// Autorange in one step (owner 2026-11-21: "ускорить автопереключение"):
+/// the range that repeated single steps would end on, for magnitude `mag`
+/// on chain position `i` (`lims`: full scales, rising), up to `hi`, down to
+/// `lo`, with the single step's own thresholds (up above `ov` x, down below
+/// 0.1 / `ov` x the range), so no new hysteresis.
+fn chain_settle(mag: f32, mut i: usize, lims: &[f32], lo: usize, hi: usize, ov: f32) -> usize {
+    while i < hi && mag > ov * lims[i] {
+        i += 1;
+    }
+    while i > lo && mag < 0.1 * lims[i] / ov {
+        i -= 1;
+    }
+    i
+}
+
+/// AD1 at (or near) its rail: the value is not known, only that it is over.
+const AD1_CLIP: f32 = 0.95 * AD1_DIV;
+
 fn acdc_down_ok(known: u8, other: u8) -> bool {
     known & other != 0
 }
@@ -2416,7 +2434,14 @@ const ENTRY_MS: u64 = 300;
 /// Manual V range change (MF page, SCPI `<f>:RANGe`, `set_range`): the
 /// stock's range-write deadline (0xfa); the first conversion is still vetted.
 const RANGE_MS: u64 = 250;
-const OHM_SINGLE_MS: u64 = 2500;
+/// Ohm entry: single steps down only this long (the stock's window was
+/// 2500 ms, against the leads' / input capacitance charging on the first
+/// conversions). Owner 2026-11-21 (faster autorange): only the entry's
+/// first conversion, the one most likely charging; after it the step size
+/// follows the reading. A range that is too low reads OL and goes back up
+/// to the one it came from (`ohm_down_r`), and the vet (OHM_VET_*) keeps
+/// unsettled conversions provisional.
+const OHM_SINGLE_MS: u64 = 500;
 
 /// Ohm vet (device 6bc494a new bug 1): after every ohm row write (the
 /// entry, each autorange step, a manual range) a conversion is final only
@@ -3390,6 +3415,60 @@ impl Dmm {
     /// Step down on this DC result (`want`)? Plain DC: at once; AC+DC: once
     /// the DC results asked for it for ACDC_DOWN_MS in a row, and only with
     /// the AC part known since the reset (`acdc_down_ok`).
+    /// Plain DC V / mV autorange in one step (`chain_settle`) on the chain
+    /// 60 mV, 600 mV, 6, 60, 600, 1000 V (`v_auto` bit 0 lets mV go up into
+    /// V, bit 1 V down into mV, as the single steps). `v`: the magnitude in
+    /// V; `clip`: AD1 at its rail, the value unknown: up to the top, the
+    /// next conversion picks the range down from there. Settles as the
+    /// single steps: 250 ms, V -> mV 450, mV -> V 350.
+    fn dcv_jump(&mut self, clk: &mut Clock, v: f32, up: bool, clip: bool) {
+        let f = self.factor();
+        let lims = [f * 0.01, f * 0.1, f, f * 10.0, f * 100.0, (f * 1000.0).min(1000.0)];
+        let (m, r) = (self.mode, self.range.max(0) as usize);
+        let cur = if m == 3 { r.min(1) } else { 2 + r.min(3) };
+        let lo = if cur < 2 || self.v_auto & 2 != 0 { 0 } else { 2 };
+        let top = if cur < 2 && self.v_auto & 1 == 0 { 1 } else { 5 };
+        let to = if !up {
+            chain_settle(v, cur, &lims, lo, cur, self.over())
+        } else if clip {
+            top
+        } else {
+            chain_settle(v, cur, &lims, cur, top, self.over())
+        };
+        if to == cur {
+            return;
+        }
+        let (nm, nr) = if to < 2 { (3, to) } else { (1, to - 2) };
+        let settle = match (m, nm) {
+            (1, 3) => 450,
+            (3, 1) => 350,
+            _ => 250,
+        };
+        self.set(clk, nm, nr as i8, settle);
+    }
+
+    /// Plain DC A down in one step on the chain 600 uA, 6 mA (uA shunt), 60,
+    /// 600 mA (mA shunt), 6, 10 A (`a_auto` 3 down to uA, else mA), only
+    /// onto a shunt the OVERLOAD latch allows (`ovl_allows`). Up stays the
+    /// single step (r0 -> r1; a shunt's top over is OVERLOAD's hop to 6 A).
+    fn dca_down(&mut self, clk: &mut Clock, a: f32) {
+        let f = self.factor();
+        let lims = [f * 1e-4, f * 1e-3, f * 1e-2, f * 0.1, f, (f * 10.0).min(10.0)];
+        let (m, r) = (self.mode, self.range.max(0) as usize);
+        let cur = (9 - m.clamp(7, 9)) as usize * 2 + r.min(1);
+        let lo = if self.a_auto == 3 { 0 } else { 2 };
+        let mut to = chain_settle(a, cur, &lims, lo.min(cur), cur, self.over());
+        // (unit u = 2 - to / 2: 0 A, 1 mA, 2 uA)
+        while to < cur && !self.ovl_allows(2 - (to / 2) as u8) {
+            to += 1;
+        }
+        if to == cur {
+            return;
+        }
+        let nm = 9 - (to / 2) as u8;
+        self.set(clk, nm, (to % 2) as i8, if nm == m { 250 } else { 350 });
+    }
+
     fn acdc_down(&mut self, now: u64, want: bool) -> bool {
         if !self.acdc {
             return want;
@@ -5182,7 +5261,14 @@ impl Dmm {
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
         let up = self.over_ok(mag > ov * lim, vet);
-        if !self.manual {
+        if !self.manual && !acdc {
+            // Plain DC V / mV: straight to the range single steps would
+            // reach (`dcv_jump`); AC+DC keeps its single steps below.
+            let down = vet && mag < 0.1 * lim / ov;
+            if up || down {
+                self.dcv_jump(clk, mag * si_k, up, ad1.unsigned_abs() as f32 > AD1_CLIP);
+            }
+        } else if !self.manual {
             if m == 1 {
                 if up && r < 3 {
                     self.set(clk, 1, r as i8 + 1, 250);
@@ -5364,6 +5450,9 @@ impl Dmm {
                 } else if m > 7 && self.a_auto & 1 != 0 {
                     self.set(clk, m - 1, 1, 250);
                 }
+            } else if !self.acdc && vet && mag < 0.1 * lim / ov {
+                // Plain DC A: straight down (`dca_down`).
+                self.dca_down(clk, mag * [1.0, 1e-3, 1e-6][u]);
             } else if self.acdc_down(clk.now_ms(), vet && !hold && mag < 0.1 * lim / ov) {
                 if r == 1 {
                     self.set(clk, m, 0, 250);
@@ -5677,7 +5766,12 @@ impl Dmm {
                 // phase (600 ms, S+10 = 2); unit changes go to the DC mode.
                 0 => {
                     if (up && r < 3) || (down && r > 0) {
-                        let to = if up { r as i8 + 1 } else { r as i8 - 1 };
+                        let mut to = if up { r as i8 + 1 } else { r as i8 - 1 };
+                        // Plain AC V: down straight to the range single
+                        // steps would reach (`chain_settle`'s rule).
+                        while !up && !acdc && to > 0 && mag < 0.1 * self.factor() * DEC4[to as usize] / ov {
+                            to -= 1;
+                        }
                         if acdc {
                             self.switch_phase(clk, 1, to, 600);
                             self.phase_n = 2;
@@ -8854,6 +8948,42 @@ mod tests {
             ema_ms(&mut acc, &mut last, 1000 + 107 * i);
         }
         assert!((acc - 107.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn chain_settle_ends_where_single_steps_end() {
+        let ov = 1.03;
+        let v = [0.06f32, 0.6, 6.0, 60.0, 600.0, 1000.0];
+        // The single steps, one at a time, as the old autorange.
+        let walk = |mag: f32, mut i: usize, lo: usize, hi: usize| {
+            loop {
+                let n = if i < hi && mag > ov * v[i] {
+                    i + 1
+                } else if i > lo && mag < 0.1 * v[i] / ov {
+                    i - 1
+                } else {
+                    return i;
+                };
+                i = n;
+            }
+        };
+        for &mag in &[0.0f32, 0.001, 0.0058, 0.0059, 0.05, 0.3, 0.62, 1.0, 5.0, 6.2, 30.0, 230.0, 640.0, 900.0] {
+            for i in 0..6 {
+                for (lo, hi) in [(0, 5), (2, 5), (0, 1)] {
+                    if i < lo || i > hi {
+                        continue;
+                    }
+                    assert_eq!(chain_settle(mag, i, &v, lo, hi, ov), walk(mag, i, lo, hi), "{mag} from {i} ({lo}..{hi})");
+                }
+            }
+        }
+        // 1 V from 1000 V: one jump to 6 V; 230 V from 6 V: to 600 V.
+        assert_eq!(chain_settle(1.0, 5, &v, 0, 5, ov), 2);
+        assert_eq!(chain_settle(230.0, 2, &v, 0, 5, ov), 4);
+        // Down only (hi = the current range) never goes up.
+        assert_eq!(chain_settle(30.0, 2, &v, 0, 2, ov), 2);
+        // The mV floor without V -> mV.
+        assert_eq!(chain_settle(0.001, 5, &v, 2, 5, ov), 2);
     }
 
     #[test]
