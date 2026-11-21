@@ -6,10 +6,10 @@
 //! HIT (to 255), a further triggered screen of the record (`hit` with
 //! `main` false, scope_page.rs sp_dpo_more) lights a dark cell with HIT / 2
 //! only, so a rare event shows at once and the shares stay those of the
-//! shown frames. The counts decay in time, not per frame: every 4th frame
-//! a group of cells (four groups scattered by a hash, `group`, one a frame)
-//! loses c x dt / tau (at least 1), tau from Display > Decay (`DECAY_MS`;
-//! INF: none). A cell hit in a share p of the frames settles near HIT x p x
+//! shown frames. The counts decay in time, not per frame: every frame each
+//! cell loses c x dt / tau, the fraction dithered over the frames (no
+//! minimum step), tau from Display > Decay (`DECAY_MS`; INF: none). A
+//! cell hit in a share p of the frames settles near HIT x p x
 //! frames-per-tau. The colour is a level 1..15 of the count on a log scale
 //! (`LEVEL`: 1 .. 200 in 14 equal ratios, 200 and above the top level, so
 //! the saturated core does not flicker with its decay), as a real DPO's
@@ -73,12 +73,12 @@ fn level(c: u8) -> u8 {
     level_of(c)
 }
 
-/// The decay group (0..3) of cell `j` in column `i`: a hash, so a frame's
-/// decay is spread over the graph with no column or row pattern.
+/// A cell's own dither start (0..255): a hash, so the cells' decay steps
+/// fall on different frames with no column or row pattern.
 #[inline(always)]
-fn group(i: usize, j: usize) -> usize {
+fn hash(i: usize, j: usize) -> u32 {
     let h = (i as u32).wrapping_mul(0x9E37_79B1) ^ (j as u32).wrapping_mul(0x85EB_CA77);
-    (h >> 30) as usize
+    h >> 24
 }
 
 pub struct Dpo {
@@ -91,7 +91,7 @@ pub struct Dpo {
     dirty: [(u8, u8); su::NCOL],
     any: bool,
     frames: u8,
-    /// Per column group: the time (ms) it last decayed.
+    /// The time (ms) of the last decay ([0]; the rest unused).
     t_fade: [u32; 4],
     /// Frame height the counts were taken at (another view: start over).
     h: i16,
@@ -256,8 +256,7 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
 
 /// One fresh frame: `tr` = CH1's frame rows per column (EMPTY: none),
 /// frame height `h`, the time `now` (ms) and the decay `tau` (ms, 0: INF);
-/// then this frame's group of cells (`group`) decays by the time since it
-/// last did.
+/// then every cell decays by the time since the last frame.
 pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
     let Some(cnt) = cnt() else {
         return;
@@ -271,28 +270,37 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
         hit(i, a, b, h, true);
     }
     let s = d();
-    s.frames = (s.frames + 1) & 3;
-    let g = s.frames as usize;
-    let dt = now.wrapping_sub(s.t_fade[g]);
-    s.t_fade[g] = now;
+    s.frames = s.frames.wrapping_add(1);
+    let f = s.frames as u32;
+    let dt = now.wrapping_sub(s.t_fade[0]);
+    s.t_fade[0] = now;
     if tau == 0 {
         #[cfg(all(target_os = "none", feature = "dbg-prof"))]
         crate::prof::add(crate::prof::NCELL, NCH.load(core::sync::atomic::Ordering::Relaxed).saturating_mul(200));
         return;
     }
-    // c -= c x k / 256, at least 1 (k = 256 x dt / tau, at most 256).
-    let k = ((dt as u64 * 256 / tau as u64).min(256)) as u32;
-    // The group: a fixed scatter of the cells, not every 4th column (owner
-    // 2026-11-21: the column groups' 4-frame decay cycle showed as slowly
-    // drifting vertical bands across the whole trace in DPO and HOT).
+    // c -= c x k / 65536 (k = 65536 x dt / tau, at most 65536: a frame is
+    // ~25 ms, so k / 256 would lose most of 10 s's decay to rounding).
+    let k = ((dt as u64 * 65536 / tau as u64).min(65536)) as u32;
+    // Every cell every frame, by c x k / 256 with the fraction dithered
+    // (owner 2026-11-21: a group of the cells decaying every 4th frame
+    // showed as stripes when the groups were columns, as scattered dots
+    // when they were a scatter): `dith` runs through 0..255 over 256
+    // frames for each cell, from its own start (`group`'s hash), so the
+    // decay is c x k / 256 on average with no minimum of 1 and no cycle.
     for i in 0..su::NCOL {
         for j in 0..NB {
             let v = &mut cnt[i * NB + j];
             let n = *v;
-            if n == 0 || group(i, j) != g {
+            if n == 0 {
                 continue;
             }
-            *v = n - ((n as u32 * k >> 8).max(1) as u8).min(n);
+            let dith = hash(i, j).wrapping_add(f.wrapping_mul(157)) & 255;
+            let dn = ((n as u32 * k + (dith << 8)) >> 16).min(n as u32) as u8;
+            if dn == 0 {
+                continue;
+            }
+            *v = n - dn;
             // Any count change moves the rows blended with it (`get_px`).
             mark(&mut s.dirty[i], j);
             s.any = true;
