@@ -20,6 +20,9 @@ official opendm40 release.
 
 ### Changed
 
+- **DMM: a grey trend chart grid** (owner): the chart's frame, grid lines
+  and dots in grey instead of the near-white of before, so the trace
+  stands out.
 - **DMM: the extra digit on DC A, mA and µA** (owner). The averaging that
   gives DC V its sixth digit now runs on current too (MED: 1.6 s in A,
   3.2 s in mA / µA; SLOW: 6.4 s). In 0.4.24 it was switched on but the

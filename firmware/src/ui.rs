@@ -23,6 +23,10 @@ pub const BG: Color = 0x0883; // (8, 16, 24)
 pub const BAR: Color = 0x1904; // (24, 32, 32) status bar
 pub const FG: Color = 0xF79E; // (240, 244, 240) text
 pub const DIM: Color = 0x94D3; // (144, 152, 152) grid / frames
+/// The DMM trend chart's frame and its grid (owner 2026-11-21: grey, not
+/// the near-white DIM): (96, 96, 96) and (64, 64, 64).
+const CHART_FRAME: Color = 0x630C;
+const CHART_GRID: Color = 0x4208;
 pub const BTN: Color = 0x2966; // (40, 44, 48) buttons / boxes
 pub const SEL: Color = 0x0419; // (0, 128, 200) selected button
 /// DMM readings (main value, extra digit, unit, mode glyph, aux values,
@@ -2571,14 +2575,16 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         }
     }
     // Column templates: plain / dotted column / vertical grid line / frame.
+    // The frame in CHART_FRAME, the grid inside it in CHART_GRID (owner
+    // 2026-11-21: grey, the trace stands out).
     let mut tpl = [[0u16; CHART_H as usize]; 4];
     for y in 0..ch as usize {
         let edge = y == 0 || y == ch as usize - 1;
         let hline = y % 16 == 0;
-        tpl[0][y] = if edge { DIM } else { BG };
-        tpl[1][y] = if edge || hline { DIM } else { BG };
-        tpl[2][y] = if edge || hline || y % 4 == 0 { DIM } else { BG };
-        tpl[3][y] = DIM;
+        tpl[0][y] = if edge { CHART_FRAME } else { BG };
+        tpl[1][y] = if edge { CHART_FRAME } else if hline { CHART_GRID } else { BG };
+        tpl[2][y] = if edge { CHART_FRAME } else if hline || y % 4 == 0 { CHART_GRID } else { BG };
+        tpl[3][y] = CHART_FRAME;
     }
     let row = |v: f32| -> u16 {
         (((hi - v) / span) * (ch - 3) as f32 + 1.0).clamp(1.0, (ch - 2) as f32) as u16
@@ -2647,7 +2653,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         }
     }
     if full && wave {
-        lcd::fill_rect(CHART_X + 1, cy + ch - 1, WAVE_CLR_W, 1, DIM);
+        lcd::fill_rect(CHART_X + 1, cy + ch - 1, WAVE_CLR_W, 1, CHART_FRAME);
         lcd::fill_rect(CHART_X + 1, cy + ch - 1 - WAVE_CLR_H, WAVE_CLR_W, WAVE_CLR_H, BG);
         wave_chip();
     }
