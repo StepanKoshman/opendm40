@@ -13,6 +13,11 @@ official opendm40 release.
 
 ### Added
 
+- **DMM: an experimental 1.07 mA ohm test current** (owner). Settings >
+  Other **Ohm 1.07 mA**: a third button on the Ω range page and a third
+  step of the Ω button's second tap. The 0.90 mA rows with the HY3131
+  source tap one step up (VDS16); the factory calibration (per range, one
+  for every test current) is used as is and never written.
 - **Generator: AM and FM** (owner). The box under the preview opens the
   Modulation page: Off / AM / FM, the modulating sine's frequency, AM depth,
   FM deviation; SCPI `SOUR:AM:*`, `SOUR:FM:*`. The table holds one
@@ -46,7 +51,8 @@ official opendm40 release.
 на экране (Settings > Other > Help) удалены, чтобы освободить память. На токе (DC A, mA, µA)
 появился шестой разряд, как на вольтметре. Новый диапазон проводимости 60 nS
 (страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
-(поле под предпросмотром).
+(поле под предпросмотром). Экспериментальный ток 1,07 mA для Ω
+(Settings > Other > Ohm 1.07 mA), калибровка не меняется.
 
 ## v0.4.25-S2084 (2026-11-20)
 

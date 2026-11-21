@@ -712,6 +712,25 @@ const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
     c[0x0B] &= !0x06;
     c
 };
+/// The experimental 1.07 mA ohm variant (`ohm_var` 2, Settings > Other
+/// "Ohm 1.07 mA"; owner 2026-11-21): the default rows r0..r5 with the
+/// source tap R31 SFUVR VDS15 (2) -> VDS16 (1), 0.90 -> 1.07 mA on 600 ohm
+/// (docs/data/short.csv). The measurement is a ratio against Rref, so the
+/// factory calibration (per range, the same for every variant: the stock
+/// "ON" rows use it too) applies unchanged; nothing is written to it. r6
+/// (the current-source row) keeps its own.
+const fn vds16(mut c: [u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
+    c[0x11] = (c[0x11] & 0xF0) | 1;
+    c
+}
+const OHM_1MA: [[u8; hy::CFG_LEN]; 6] = [
+    vds16(OHM_R0_ROW),
+    vds16(CFG_F10_P8CLR[1]),
+    vds16(CFG_F10_P8CLR[2]),
+    vds16(CFG_F10_P8CLR[3]),
+    vds16(CFG_F10_P8CLR[4]),
+    vds16(CFG_F10_P8CLR[5]),
+];
 
 // Ohm r7: the experimental 600 Mohm range (firmware/docs/ohm-600m.md). Manual
 // only: the autorange, the AUTO key's short-press range steps and a restored
@@ -984,14 +1003,16 @@ fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
 /// `Dmm::write_config`) = r1's default value, inferred: its own row has the
 /// same tap and Rref switches but was not measured. r6 (60 M, the
 /// current-source row): not measured, None.
-pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
-    [Some(8.983e-4), Some(8.983e-4)],
-    [Some(8.983e-4), Some(2.795e-4)],
-    [Some(1.969e-4), Some(5.842e-5)],
-    [Some(2.026e-5), Some(6.559e-6)],
-    [Some(2.172e-6), Some(6.640e-7)],
-    [Some(2.153e-7), Some(8.557e-8)],
-    [None, None],
+/// Third column: the experimental 1.07 mA variant (`ohm_var` 2, `OHM_1MA`:
+/// VDS16, docs/data/short.csv VDS16 rows; r0 as r1).
+pub const OHM_ISC: [[Option<f32>; 3]; 7] = [
+    [Some(8.983e-4), Some(8.983e-4), Some(1.069e-3)],
+    [Some(8.983e-4), Some(2.795e-4), Some(1.069e-3)],
+    [Some(1.969e-4), Some(5.842e-5), Some(2.091e-4)],
+    [Some(2.026e-5), Some(6.559e-6), Some(2.093e-5)],
+    [Some(2.172e-6), Some(6.640e-7), Some(2.217e-6)],
+    [Some(2.153e-7), Some(8.557e-8), Some(2.197e-7)],
+    [None, None, None],
 ];
 /// Diode test current (A): OP3 as a current source (SMODE 0110, SCP / SCN)
 /// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
@@ -1010,7 +1031,7 @@ pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
     if r == OHM600 || r == OHMNS {
         return Some(OHM600_ISC);
     }
-    OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
+    OHM_ISC[r.clamp(0, 6) as usize][var.min(2) as usize]
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
@@ -2126,6 +2147,10 @@ pub struct Dmm {
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
+    /// Settings > Other "Ohm 1.07 mA" (experimental): the third test current
+    /// (`ohm_var` 2, `OHM_1MA`) on the range page and in the ohm button's
+    /// cycle.
+    pub ohm_1ma: bool,
     /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..31 in
     /// mohm; `poll_ohm`): the test leads' resistance in ohm, taken off every
     /// ohm reading of r0..r6, independent of REL. 0 = off.
@@ -2759,6 +2784,7 @@ impl Dmm {
             tr: tr::tr_static(),
             burden_show: false,
             ohm_neg: false,
+            ohm_1ma: false,
             ohm_null: 0.0,
             o6: Ohm600::NEW,
         }
@@ -2806,7 +2832,8 @@ impl Dmm {
     /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
     /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
-        self.ohm_var = v & 1;
+        // 2: the experimental 1.07 mA (`OHM_1MA`), only while enabled.
+        self.ohm_var = if v == 2 && self.ohm_1ma { 2 } else { v & 1 };
         // 600 Mohm has its own source: the variant waits for the next range
         // (no row rewrite, no restart of its phases).
         if self.mode == 10 && !is_ohm600(self.mode, self.range) {
@@ -2820,6 +2847,16 @@ impl Dmm {
         self.ohm_var
     }
 
+    /// Settings > Other "Ohm 1.07 mA": off takes the 1.07 mA variant back
+    /// to 0.90 mA (the caller rewrites the row, `set_ohm_var`, when ohm is
+    /// measuring).
+    pub fn set_ohm_1ma(&mut self, on: bool) {
+        self.ohm_1ma = on;
+        if !on && self.ohm_var == 2 {
+            self.ohm_var = 0;
+        }
+    }
+
     /// The buttons' last sub-modes (`submem`), for the settings record.
     pub fn sub_mem(&self) -> u8 {
         self.sub_mem
@@ -2828,7 +2865,7 @@ impl Dmm {
     /// force is not changed) and the ohm test current (0 / 1).
     pub fn set_sub_mem(&mut self, mem: u8, ohm: u8) {
         self.sub_mem = mem & 0x3F;
-        if ohm <= 1 {
+        if ohm <= 1 || (ohm == 2 && self.ohm_1ma) {
             self.ohm_var = ohm;
         }
     }
@@ -2858,7 +2895,7 @@ impl Dmm {
         if matches!(a, 1 | 3) {
             self.a_auto = a;
         }
-        if ohm <= 1 {
+        if ohm <= 1 || (ohm == 2 && self.ohm_1ma) {
             self.ohm_var = ohm;
         }
     }
@@ -3052,6 +3089,8 @@ impl Dmm {
                 if r >= OHM600 as usize {
                     self.o6.restart();
                     &OHM600_ROW
+                } else if self.ohm_var == 2 && r <= 5 {
+                    &OHM_1MA[r]
                 } else if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
@@ -4253,7 +4292,9 @@ impl Dmm {
                     self.manual = false;
                     self.set(clk, 10, 6, OHM_ENTRY_MS);
                 } else if !is_ohm600(self.mode, self.range) {
-                    self.set_ohm_var(clk, self.ohm_var ^ 1);
+                    // 0.90 -> 0.28 ON (-> 1.07 mA, experimental) -> 0.90.
+                    let n = if self.ohm_1ma { (self.ohm_var + 1) % 3 } else { (self.ohm_var == 0) as u8 };
+                    self.set_ohm_var(clk, n);
                 }
             }
             Button::Cap => {
@@ -4478,7 +4519,7 @@ impl Dmm {
                 // BT has no 60 ohm or 600 Mohm range: report them as 600
                 // ohm / 60 Mohm.
                 let r = if self.manual { self.range.clamp(1, 6) as u8 - 1 } else { 6 };
-                self.ohm_var << 6 | r << 3 | 2
+                (self.ohm_var & 1) << 6 | r << 3 | 2
             }
             11 => 0x44,
             12 => 0x04,
@@ -8427,6 +8468,23 @@ mod tests {
         assert_eq!(o.leak, l);
         o.learn(a, b);
         assert_eq!(o.leak, l);
+    }
+
+    #[test]
+    fn ohm_1ma_rows() {
+        // The default rows with the source tap VDS16, nothing else changed.
+        for r in 0..6 {
+            let base = if r == 0 { OHM_R0_ROW } else { CFG_F10_P8CLR[r] };
+            assert_eq!(base[0x11] & 0x0F, 2, "r{r}: VDS15");
+            assert_eq!(OHM_1MA[r][0x11] & 0x0F, 1, "r{r}: VDS16");
+            let d: Vec<usize> = (0..hy::CFG_LEN).filter(|&i| OHM_1MA[r][i] != base[i]).collect();
+            assert_eq!(d, vec![0x11], "r{r}");
+        }
+        assert_eq!(ohm_test_current(1, 2), Some(1.069e-3));
+        assert_eq!(ohm_test_current(0, 2), Some(1.069e-3));
+        assert_eq!(ohm_test_current(6, 2), None);
+        // Above 2: the third column, not out of bounds.
+        assert_eq!(ohm_test_current(2, 7), Some(2.091e-4));
     }
 
     #[test]

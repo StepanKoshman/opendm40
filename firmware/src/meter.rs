@@ -439,6 +439,9 @@ pub const EXT_TREND_SHIFT: u32 = 21;
 pub const EXT_RANGE_SHIFT: u32 = 24;
 /// p[38] bit 28: the continuity beeper with the volume (0 = always: older records).
 pub const EXT_CONT_VOL: u32 = 1 << 28;
+/// p[38] bit 30: the experimental 1.07 mA ohm test current available
+/// (Settings > Other "Ohm 1.07 mA"; 0 = off: older records).
+pub const EXT_OHM_1MA: u32 = 1 << 30;
 /// p[38] bit 29: the USB disk starts writable, "PC can edit" (opendm40
 /// fork, owner 2026-11-12; 0 = Files live: older records).
 pub const EXT_USB_RW: u32 = 1 << 29;

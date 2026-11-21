@@ -157,6 +157,7 @@ SECTIONS
         *(.text.*8opendm404scpi11gen_mod_cmd*);
         *(.text.*8opendm403app*3App12scpi_gen_mod*);
         *(.text.*8opendm403app*3App11gen_mod_tap*);
+        *(.text.*8opendm403app*3App14ohm_1ma_toggle*);
         /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
          * loop and asm are `.text.a2.*` (zero-wait region A2). */
         *(.text.*8opendm408memprobe*);
