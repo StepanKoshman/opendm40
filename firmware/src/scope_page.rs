@@ -956,6 +956,7 @@ impl App {
         let row = |code: u16| -> i32 { (r0 + slope * code as f32) as i32 };
         let n = f.data.len();
         let mut pseg: Option<(i32, i32)> = None;
+        crate::prof::enter(crate::prof::COLS);
         for i in 0..scope::COLS {
             let (lo, hi);
             if let Some(cols) = f.cols {
@@ -1005,6 +1006,7 @@ impl App {
             pseg = Some((lo, hi));
             c.seg[i] = (a.clamp(-30000, 30000) as i16, b.clamp(-30000, 30000) as i16);
         }
+        crate::prof::exit(crate::prof::COLS);
         c.valid = true;
         c.pos = s.pos;
         c.hpos = s.hpos;
@@ -1013,7 +1015,9 @@ impl App {
         // The digital phosphor is shown: the record's other triggered
         // screens too (a rare event shows at once).
         if su::graph().dpo != 0 && f.cols.is_none() && n >= scope::COLS {
+            crate::prof::enter(crate::prof::DMORE);
             self.sp_dpo_more(f, r0, slope);
+            crate::prof::exit(crate::prof::DMORE);
         }
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
@@ -1069,7 +1073,9 @@ impl App {
         if dm != 0 {
             if fresh {
                 let tau = crate::scope_dpo::DECAY_MS[(self.sp.decay as usize).min(crate::scope_dpo::DECAY_MS.len() - 1)];
+                crate::prof::enter(crate::prof::DFADE);
                 crate::scope_dpo::frame(&g.tr, h as i16, self.now as u32, tau);
+                crate::prof::exit(crate::prof::DFADE);
             }
             g.tr = [su::EMPTY; su::NCOL];
         } else if g.dpo != 0 {

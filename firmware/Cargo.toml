@@ -20,7 +20,11 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
+# TEMPORARY profiling image (owner 2026-11-21, the scope's DPO / HOT /
+# Hi-res drawing speed): DBG:PROF? in, the Modbus / DALI decoders and the
+# frame log out to make room. Restore the line below after the check.
+# default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log", "dpo"]
+default = ["vdisk", "ad2-isr", "dpo", "dbg-prof"]
 # Digital phosphor (Display > Persist DPO / HOT; src/scope_dpo.rs): its 14 KB
 # of hit counts are the tail of the scope's record buffer while the phosphor
 # is shown (scope::DPO_K: the rings 7 K samples shorter then).

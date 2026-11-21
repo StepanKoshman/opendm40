@@ -91,11 +91,18 @@ pub const DBAR: usize = 20;
 /// The protocol decoder: one record's whole decode (the sum of its X2
 /// slices, `add`).
 pub const DJOB: usize = 21;
-pub const N: usize = 22;
+/// The scope frame's CH1 columns (min / max or the Hi-res mean, sp_frame).
+pub const COLS: usize = 22;
+/// The phosphor's further screens (scope_page sp_dpo_more).
+pub const DMORE: usize = 23;
+/// The phosphor's hits and decay of a frame (scope_dpo::frame).
+pub const DFADE: usize = 24;
+pub const N: usize = 25;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
     "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar", "dec.job",
+    "s.cols", "dpo.more", "dpo.fade",
 ];
 
 #[derive(Clone, Copy)]
