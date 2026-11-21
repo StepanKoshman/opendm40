@@ -2448,6 +2448,9 @@ impl Graph {
             if (rc | R_ALL) & cm != 0 { d.grid } else { C_FILL }
         };
         self.px = 0;
+        // A vertical line, a marker or a hole changed: every column checks
+        // them (else a column with no change of its own is skipped).
+        let col_moves = d.v != o.v || marks_changed || self.holes != self.d_holes;
         // DBG:PROF? fl.spans / fl.cut / fl.pix (cycles, this call).
         #[cfg(target_os = "none")]
         let mut prof_q = [0u32; 3];
@@ -2477,13 +2480,28 @@ impl Graph {
                 return;
             }
             let fx = i as i16 + 1;
+            // The phosphor's changed cells (taken: a full column covers them).
+            let dsp = if dm != 0 { crate::scope_dpo::take(i) } else { None };
+            // Nothing of this column changed (the common case between two
+            // frames): no spans, holes or markers (owner 2026-11-21, scope
+            // speed: the per-column work of the unchanged columns was most
+            // of a paint pass).
+            if !full
+                && dsp.is_none()
+                && !col_moves
+                && self.tr[i] == self.d_tr[i]
+                && self.ps[i] == self.d_ps[i]
+                && self.ma[i] == self.d_ma[i]
+                && self.gn[i] == self.d_gn[i]
+                && self.c2[i] == self.d_c2[i]
+            {
+                continue;
+            }
             // Its screen columns (one; the wide graph: one or two).
             let (sx0, sx1) = (scol(fx), scol(fx + 1) - 1);
             #[cfg(target_os = "none")]
             let tq0 = cycles();
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
-            // The phosphor's changed cells (taken: a full column covers them).
-            let dsp = if dm != 0 { crate::scope_dpo::take(i) } else { None };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
