@@ -161,6 +161,8 @@ SECTIONS
         /* Start-up only: the settings restore (App::new, before any
          * stream). */
         *(.text.*8opendm403app*3App7restore*);
+        /* The keypad's OK (a tap on the Keypad view). */
+        *(.text.*8opendm403app*3App8kp_apply*);
         /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
          * loop and asm are `.text.a2.*` (zero-wait region A2). */
         *(.text.*8opendm408memprobe*);
@@ -628,7 +630,7 @@ ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
 /* Region C budget: >= 4 KiB free below 0x080A0000 (build.sh warns below
  * 8 KiB). C grows by whole moved functions (0.3..5 KB each);
  * 4 KiB still takes one more small move after the warning. */
-ASSERT(0x080A0000 - __image_end >= 2K, "less than 4 KiB of region C (.cold) free below 0x080A0000: cut code or move .cold code back to region B");
+ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free below 0x080A0000: cut code or move .cold code back to region B");
 /* Memory budgets (2026-10-22 memory rework; the numbers then, ad2-isr (the
  * default) / without it: static worst stack path 21 760 / 21 396 B, stack
  * 46 620 / 46 688 B, SRAM free 12 856 / 13 040 B, region B free 24 508 /
@@ -665,4 +667,4 @@ ASSERT(__bkp_bss_end <= 0x40024FE8, ".bkp_bss reaches the settings sequence word
 ASSERT(__usbhs_bss_start >= 0x40060000 && __usbhs_bss_end <= 0x40061000, ".usbhs_bss outside the 4 KiB USBHS FIFO RAM");
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
-ASSERT(0x08080000 - __b_end >= 6K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");
+ASSERT(0x08080000 - __b_end >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

@@ -2203,6 +2203,8 @@ impl App {
         }
     }
 
+    /// The keypad's OK (a tap on the Keypad view: no stream runs there).
+    #[inline(never)] // .cold (link-native.x)
     fn kp_apply(&mut self) {
         let n = self.kp_n;
         if self.kp_target == 5 && n == 0 {
