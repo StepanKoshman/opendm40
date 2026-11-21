@@ -93,12 +93,12 @@ fn count_in(l: u8, rng: &mut u32) -> u8 {
 }
 
 /// Level of cell `b` in column `i` (two cells a byte: even ones low).
-#[inline(always)]
+#[inline]
 fn lv(cnt: &[u8], i: usize, b: usize) -> u8 {
     cnt[i * (NB / 2) + b / 2] >> ((b & 1) * 4) & 15
 }
 
-#[inline(always)]
+#[inline]
 fn set_lv(cnt: &mut [u8], i: usize, b: usize, l: u8) {
     let (v, sh) = (&mut cnt[i * (NB / 2) + b / 2], (b & 1) * 4);
     *v = (*v & !(15 << sh)) | (l & 15) << sh;

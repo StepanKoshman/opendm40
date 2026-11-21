@@ -945,11 +945,8 @@ impl Ohm600 {
     /// the readings in it, kohm) is about one such digit or less (as the
     /// other ranges' extra digits: DC V 6 V shows its 10 uV at a ~7 uV mean
     /// sd); on at 0.7 digit, off above 1.3 (no flicker at the edge).
-    // Region A2 (zero-wait, the slack below the loader marker): region B
-    // was 0.2 KB short and region C 16 B short with it (owner 2026-11-21,
-    // after the scope speed-up).
-    #[inline(never)]
-    #[cfg_attr(target_os = "none", link_section = ".text.a2.ohm600_ext")]
+    // (Plain loops, no iterator chains or table: 228 B, and region B was
+    // 64 B short with it after the scope speed-up, owner 2026-11-21.)
     fn ext(&mut self, dec: u8) -> bool {
         let n = self.hn as usize;
         if n < OHM600_AVG {
@@ -957,10 +954,21 @@ impl Ohm600 {
             return false;
         }
         let h = &self.hist[..n];
-        let m = h.iter().sum::<f32>() / n as f32;
-        let var = h.iter().map(|x| (x - m) * (x - m)).sum::<f32>() / (n - 1) as f32;
+        let mut m = 0.0;
+        for &x in h {
+            m += x;
+        }
+        m /= n as f32;
+        let mut var = 0.0;
+        for &x in h {
+            var += (x - m) * (x - m);
+        }
+        var /= (n - 1) as f32;
         // kohm of one extra digit: 1000 / 10^(dec + 1).
-        let digit = 1000.0 / [10.0, 100.0, 1000.0, 10000.0][(dec as usize).min(3)];
+        let mut digit = 100.0;
+        for _ in 0..dec.min(3) {
+            digit *= 0.1;
+        }
         let k = if self.ext_on { 1.3 } else { 0.7 };
         self.ext_on = var / n as f32 <= k * k * digit * digit;
         self.ext_on
