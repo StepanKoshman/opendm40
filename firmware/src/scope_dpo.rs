@@ -37,6 +37,10 @@ pub const ENABLED: bool = cfg!(feature = "dpo") || cfg!(not(target_os = "none"))
 pub const CELL: i16 = 2;
 pub const NB: usize = 140;
 const BYTES: usize = if ENABLED { su::NCOL * NB / 2 } else { 0 };
+/// Count -> level table after the levels (256 B of the loan's slack,
+/// built at each claim): one load instead of up to 15 compares a cell.
+const LVL: usize = BYTES;
+const TOTAL: usize = if ENABLED { BYTES + 256 } else { 0 };
 /// A shown frame's hit.
 const HIT: u8 = 16;
 /// Count -> level: the level is the number of these a count reaches
@@ -47,14 +51,26 @@ const LEVEL: [u8; 15] = [1, 2, 3, 4, 5, 7, 10, 14, 21, 30, 44, 64, 93, 136, 200]
 pub const DECAY_MS: [u32; 5] = [300, 1000, 3000, 10_000, 0];
 pub const DECAY_NAMES: [&str; 5] = ["0.3s", "1s", "3s", "10s", "INF"];
 
-#[inline(always)]
-fn level(c: u8) -> u8 {
+fn level_of(c: u8) -> u8 {
     // (a plain loop: the iterator chain stays calls at opt-level "z")
     let mut n = 0;
     while n < 15 && c >= LEVEL[n] {
         n += 1;
     }
     n as u8
+}
+
+/// Count -> level (the table; the memory is lent: callers checked `cnt`).
+#[cfg(target_os = "none")]
+#[inline(always)]
+fn level(c: u8) -> u8 {
+    // SAFETY: LVL + 255 < TOTAL, inside the loan.
+    unsafe { *cntp().add(LVL + c as usize) }
+}
+/// The host tools: no claim (`attach`), so no table.
+#[cfg(not(target_os = "none"))]
+fn level(c: u8) -> u8 {
+    level_of(c)
 }
 
 /// A count for level `l` (`Dpo::rng` the random part): 0 for none, 255 for
@@ -70,7 +86,8 @@ fn count_in(l: u8, rng: &mut u32) -> u8 {
             x ^= x >> 17;
             x ^= x << 5;
             *rng = x;
-            a + ((x >> 8) % (b - a) as u32) as u8
+            // (a multiply, not a division by the range)
+            a + (((x >> 16) * (b - a) as u32) >> 16) as u8
         }
     }
 }
@@ -109,9 +126,9 @@ pub struct Dpo {
 static mut D: Dpo = Dpo { cnt: core::ptr::null_mut(), gen: 0, dirty: [(0, 0); su::NCOL], any: false, frames: 0, t_fade: [0; 4], h: 0, rng: 0x2545_F491 };
 /// The host tools' counts (no scope buffer there).
 #[cfg(not(target_os = "none"))]
-static mut HOST: [u8; BYTES] = [0; BYTES];
+static mut HOST: [u8; TOTAL] = [0; TOTAL];
 #[cfg(target_os = "none")]
-const _: () = assert!(BYTES <= crate::scope::DPO_K * 2);
+const _: () = assert!(TOTAL <= crate::scope::DPO_K * 2);
 
 fn d() -> &'static mut Dpo {
     // SAFETY: main loop only (the scope page and its graph flush).
@@ -163,6 +180,10 @@ pub fn attach(mem: Option<(*mut u8, u32)>) {
                 s.gen = g;
                 // SAFETY: as `cnt`.
                 unsafe { core::ptr::write_bytes(p, 0, BYTES) };
+                for c in 0..256 {
+                    // SAFETY: as `cnt` (TOTAL lent).
+                    unsafe { *p.add(LVL + c) = level_of(c as u8) };
+                }
                 s.dirty = [(0, 0); su::NCOL];
                 s.any = false;
                 s.frames = 0;
