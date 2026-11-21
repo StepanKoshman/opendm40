@@ -1052,10 +1052,7 @@ impl DmmView {
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
             _ if band => 255,
-            10 if aux[0].is_none() && !self.power => {
-                let v2 = OHM_VAR.load(core::sync::atomic::Ordering::Relaxed) == 2;
-                r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6 | (v2 as u8) << 7
-            }
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3 | (self.ohm_null as u8) << 6,
             12 if aux[0].is_none() && !self.power => 0x10,
             13 if !self.power => match r.aux2 {
                 Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
@@ -1311,9 +1308,7 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
 /// (r0..r6): "NULL" after it, in the reading's colour.
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
 fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
-    // The experimental 1.07 mA (OHM_VAR 2) is not "on" (the stock ON tag).
-    let var = if on { 1 } else if mode == 10 && OHM_VAR.load(core::sync::atomic::Ordering::Relaxed) == 2 { 2 } else { 0 };
-    let Some(i) = crate::dmm::test_current(mode, range, var) else {
+    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
         // 6 M label (device check 2f56ff9).
         let b = OHM_I_RECT;
@@ -1330,12 +1325,12 @@ fn test_current_label(mode: u8, range: i8, on: bool, null: bool) {
     };
     let mut b = [0u8; 16];
     // The experimental 600 Mohm says so, in the reading's colour.
-    let exp = crate::dmm::is_ohm600(mode, range) || var == 2;
+    let exp = crate::dmm::is_ohm600(mode, range);
     let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
-    if null && mode == 10 && !crate::dmm::is_ohm600(mode, range) {
+    if null && mode == 10 && !exp {
         let w = sf::text_width(sf::F14, t.as_str(), 1);
         sf::label(sf::F14, rect(OHM_I_RECT.x + w + 12, OHM_I_RECT.y, OHM_I_RECT.w - w - 12, OHM_I_RECT.h), "NULL", VALUE, BG, 1, 1);
     }
@@ -1693,9 +1688,9 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         // The stock's second ohm mode (m+8, toggled by a second tap on the
         // ohm button; "ON" tag on the button): the p8set rows, a lower test
         // current for in-circuit measurements. `sub` = Dmm::ohm_var here.
-        for (i, name) in OHM_VARS.iter().enumerate().take(if ohm3() { 3 } else { 2 }) {
+        for (i, name) in OHM_VARS.iter().enumerate() {
             let c = if i as u8 == sub { SEL } else { 0x2966 };
-            let r = ohm_var_rect(i);
+            let r = rect([8, 244][i], 182, 228, 38);
             sf::rbox(r, 6, c, BG);
             sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
         }
@@ -1873,26 +1868,7 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 /// Labelled with the variant's short-circuit test current on the 600 ohm
 /// range (dmm::OHM_ISC r1, measured); "ON" = the button's stock tag.
-/// The third, "1.07 mA EXP" (Dmm::ohm_var 2), only while Settings > Other
-/// "Ohm 1.07 mA" is on (`OHM3`): then three buttons of 150 px.
-pub const OHM_VARS: [&str; 3] = ["0.90 mA", "0.28 mA ON", "1.07 mA EXP"];
-
-/// Settings > Other "Ohm 1.07 mA" on (App sets it): three ohm variant
-/// buttons, the Err(9) hit.
-pub static OHM3: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-/// The ohm variant in force (App sets it with the DMM page's static draw):
-/// the test current label's third variant (`test_current_label`).
-pub static OHM_VAR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
-
-fn ohm3() -> bool {
-    OHM3.load(core::sync::atomic::Ordering::Relaxed)
-}
-
-/// Ohm variant button `i` of the range page: two of 228 px, or three of
-/// 150 px with the experimental one (`OHM3`).
-fn ohm_var_rect(i: usize) -> sf::Rect {
-    if ohm3() { rect([8, 162, 316][i.min(2)], 182, 150, 38) } else { rect([8, 244][i.min(1)], 182, 228, 38) }
-}
+pub const OHM_VARS: [&str; 2] = ["0.90 mA", "0.28 mA ON"];
 
 /// `range_press` targets besides the range items (0..): RP_ERR + the Err
 /// code of `range_hit`, the Wave and Inrush buttons.
@@ -1926,8 +1902,7 @@ fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf
         RP_INRUSH => (INRUSH_BTN, "Inrush", false),
         i if (i as usize) < items.len() => (range_rect(i as usize), items[i as usize].0, sel == Some(i as usize)),
         RP_ERR.. => match (t - RP_ERR, b) {
-            (k @ 0..=1, Button::Ohm) => (ohm_var_rect(k as usize), OHM_VARS[k as usize], k == sub),
-            (9, Button::Ohm) if ohm3() => (ohm_var_rect(2), OHM_VARS[2], sub == 2),
+            (k @ 0..=1, Button::Ohm) => (rect([8, 244][k as usize], 182, 228, 38), OHM_VARS[k as usize], k == sub),
             (k @ (0 | 1 | 3 | 6), Button::Volt | Button::Amp) => {
                 let i = match k {
                     3 => 2,
@@ -1960,8 +1935,7 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         }
     }
     if (179..223).contains(&y) && b == Button::Ohm && ohm_vars_shown(sel) {
-        // Err(9): the experimental 1.07 mA (Err(2) is OK).
-        return Some(Err(if ohm3() { [0, 1, 9][((x.max(8) - 8) / 154).min(2) as usize] } else if x < 240 { 0 } else { 1 }));
+        return Some(Err(if x < 240 { 0 } else { 1 }));
     }
     if (179..223).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
         // Coupling row (cpl_rect): DC / AC / AC+DC / AUTO -> Err 0 / 1 / 3 /
@@ -3404,9 +3378,10 @@ pub const S_USB: u8 = 17;
 pub const S_BURDEN: u8 = 18;
 /// Opens the Device / About page (the stock section 6).
 pub const S_DEVICE: u8 = 19;
-/// The experimental 1.07 mA ohm test current (Dmm::ohm_1ma; default OFF).
-/// Id 20 was the touch test page's row until 0.4.26.
-pub const S_OHM_1MA: u8 = 20;
+/// Id 20: the touch test page's row until 0.4.26 (removed, owner
+/// 2026-11-21); kept free so the ids after it stay.
+#[allow(dead_code)]
+pub const S_FREE_20: u8 = 20;
 /// The accuracy label (../docs/dmm-accuracy.md; default ON).
 pub const S_ACC: u8 = 21;
 /// Ohm readings below 0 (Dmm::ohm_neg; default OFF).
@@ -3425,7 +3400,7 @@ pub const SET_N: usize = 25;
 pub const SET_NAMES: [&str; SET_N] = [
     "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "", "Jack alerts",
-    "Danger alarm", "USB disk", "Burden voltage", "Device info", "Ohm 1.07 mA", "Accuracy", "Negative ohm",
+    "Danger alarm", "USB disk", "Burden voltage", "Device info", "", "Accuracy", "Negative ohm",
     "Mode Remember", "Continuity beep",
 ];
 
@@ -3438,7 +3413,7 @@ pub const SET_TABS: [(&str, &[u8]); 6] = [
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
     ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),
-    ("Other", &[S_BT, S_USB, S_OHM_1MA, S_DEVICE]),
+    ("Other", &[S_BT, S_USB, S_DEVICE]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
 /// Device row (its page returns to it).

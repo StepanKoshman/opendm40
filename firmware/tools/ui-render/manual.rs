@@ -206,15 +206,6 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm-600m", &page, false);
     save1(out, "range-ohm-600m");
 
-    // The experimental 1.07 mA test current (Settings > Other "Ohm 1.07
-    // mA"): three variant buttons, the third chosen.
-    host::reset(0);
-    ui::OHM3.store(true, core::sync::atomic::Ordering::Relaxed);
-    ui::range_page(Button::Ohm, Some(2), 2, None);
-    ui::OHM3.store(false, core::sync::atomic::Ordering::Relaxed);
-    ck.check_opts("manual/range-ohm-1ma", &page, false);
-    save1(out, "range-ohm-1ma");
-
     // The nS range chosen on the range page.
     host::reset(0);
     ui::range_page(Button::Ohm, Some(9), 0, None);

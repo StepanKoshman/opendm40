@@ -939,7 +939,6 @@ impl App {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
                 self.pw_btn_glyph();
-                ui::OHM_VAR.store(self.dmm.ohm_var(), core::sync::atomic::Ordering::Relaxed);
                 self.dmm_view.draw_static(self.dmm.button(), self.dmm.shown_mode(), self.dmm.sub() == 2 || self.dmm.pw.on, self.dmm.ohm_var() == 1);
                 self.pw_rng_key = 0;
                 if self.dmm.pw.on {
@@ -1058,7 +1057,6 @@ impl App {
                 vals[ui::S_BURDEN as usize] = if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" };
                 vals[ui::S_ACC as usize] = if self.dmm_view.acc_on { "ON" } else { "OFF" };
                 vals[ui::S_OHM_NEG as usize] = if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" };
-                vals[ui::S_OHM_1MA as usize] = if self.dmm.ohm_1ma { "ON (exp)" } else { "OFF" };
                 vals[ui::S_REMEMBER as usize] = if self.mode_remember { "ON" } else { "OFF" };
                 vals[ui::S_CONT as usize] = if self.cont_always { "Always" } else { "With volume" };
                 ui::settings(self.set_tab, &vals);
@@ -2371,7 +2369,6 @@ impl App {
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
             | if self.dmm_view.acc_on { 0 } else { crate::meter::EXT_ACC_OFF }
             | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
-            | if self.dmm.ohm_1ma { crate::meter::EXT_OHM_1MA } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
             | if self.cont_always { 0 } else { crate::meter::EXT_CONT_VOL }
@@ -2482,9 +2479,6 @@ impl App {
         self.dmm.set_ohm_null((p[11] >> 16) as f32 * 1e-3);
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
-        // Before the ohm variant (p[2], p[0]): 1.07 mA needs it on.
-        self.dmm.set_ohm_1ma(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_OHM_1MA != 0);
-        ui::OHM3.store(self.dmm.ohm_1ma, core::sync::atomic::Ordering::Relaxed);
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
         if cont {
             self.dmm.set_rate(ext.rate);
@@ -3863,21 +3857,6 @@ impl App {
         }
     }
 
-    /// Settings > Other "Ohm 1.07 mA" (experimental): the third ohm test
-    /// current on the range page and in the ohm button's cycle; off while it
-    /// is in force: back to 0.90 mA (the row rewritten when ohm measures).
-    #[inline(never)] // .cold (link-native.x): a settings tap
-    fn ohm_1ma_toggle(&mut self, clk: &mut Clock) {
-        let on = !self.dmm.ohm_1ma;
-        let was2 = self.dmm.ohm_var() == 2;
-        self.dmm.set_ohm_1ma(on);
-        ui::OHM3.store(on, core::sync::atomic::Ordering::Relaxed);
-        if was2 && !on {
-            self.dmm.set_ohm_var(clk, 0);
-            self.func_changed();
-        }
-    }
-
     #[inline(never)] // .cold (link-native.x): on a tap
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
@@ -4073,8 +4052,7 @@ impl App {
                         self.ohm_null_tap(now);
                         self.redraw = true;
                     }
-                    Some(Err(k @ (0 | 1 | 9))) if b == Button::Ohm => {
-                        let k = if k == 9 { 2 } else { k };
+                    Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
                             self.dmm.set_ohm_var(clk, k);
                             self.func_changed();
@@ -4399,7 +4377,6 @@ impl App {
                         // Negative ohm: from the next reading on.
                         self.dmm.ohm_neg = !self.dmm.ohm_neg;
                     }
-                    ui::S_OHM_1MA => self.ohm_1ma_toggle(clk),
                     ui::S_REMEMBER => {
                         // Mode Remember: applies at the next power-on.
                         self.mode_remember = !self.mode_remember;

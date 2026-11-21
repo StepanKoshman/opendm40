@@ -587,19 +587,6 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   Short-circuit currents, measured on one unit with the jacks shorted. The
   open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
-- **1.07 mA EXP** (experimental; on with **Settings > Other > Ohm 1.07
-  mA**): a third test current, the 0.90 mA source one step higher (1.07 mA
-  on 600 Ω and 60 Ω, 209 µA on 6 kΩ, 21 µA on 60 kΩ; 60 MΩ keeps its own).
-  The range page then shows three buttons, and a second tap on Ω steps
-  0.90 → 0.28 ON → 1.07 → 0.90 mA. The factory calibration is the same for
-  every test current and is not changed: the meter measures the ratio to
-  its reference resistor, so the reading does not depend on the current.
-  The label top left shows **EXP I 1.1 mA**. Switching the setting off
-  returns to 0.90 mA.
-
-  ![The range page with the 1.07 mA test current](img/range-ohm-1ma.png)
-
-  *The range page with the 1.07 mA test current.*
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
@@ -2598,7 +2585,6 @@ goes back to the main menu.
 |---|---|---|---|
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Kept over a restart. |
-| **Ohm 1.07 mA** | ON (exp), OFF | OFF | Experimental: a third ohm test current, [1.07 mA](#resistance). |
 | **Device info** | | | Opens the [Device page](#the-device-page). |
 
 ### The Device page
