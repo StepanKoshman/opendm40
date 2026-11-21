@@ -400,9 +400,11 @@ SECTIONS
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
         /* The experimental 600 Mohm / 60 nS ranges' readout (owner
-         * 2026-11-21, region B 0.5 KB short after the scope speed-up): once
-         * per AD1 result, only in those ranges (no AD2 stream runs in ohm). */
-        *(.text.*8opendm403dmm*3Dmm11poll_ohm600*);
+         * 2026-11-21, region B 0.5 KB short after the scope speed-up): the
+         * helpers of poll_ohm600, once per AD1 result, only in those ranges
+         * (no AD2 stream runs in ohm). poll_ohm600 itself (868 B) did not
+         * fit in C. */
+        *(.text.*8opendm403dmm*6Ohm6007average*);
         *(.text.*8opendm403dmm*6Ohm6005learn*);
         *(.text.*8opendm403dmm*6Ohm6008decimals*);
         *(.text.*8opendm403dmm*6Ohm6003ext*);
@@ -636,7 +638,7 @@ ASSERT(__image_end <= 0x080A0000, "image reaches the FS-loader at 0x080A0000");
 /* Region C budget: >= 4 KiB free below 0x080A0000 (build.sh warns below
  * 8 KiB). C grows by whole moved functions (0.3..5 KB each);
  * 4 KiB still takes one more small move after the warning. */
-ASSERT(0x080A0000 - __image_end >= 2K, "less than 4 KiB of region C (.cold) free below 0x080A0000: cut code or move .cold code back to region B");
+ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free below 0x080A0000: cut code or move .cold code back to region B");
 /* Memory budgets (2026-10-22 memory rework; the numbers then, ad2-isr (the
  * default) / without it: static worst stack path 21 760 / 21 396 B, stack
  * 46 620 / 46 688 B, SRAM free 12 856 / 13 040 B, region B free 24 508 /

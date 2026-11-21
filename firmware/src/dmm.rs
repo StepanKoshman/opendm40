@@ -899,6 +899,7 @@ impl Ohm600 {
 
     /// The sliding mean with `k` added (restarted on a step of more than
     /// OHM600_STEP of the mean, at least of `floor`).
+    #[inline(never)] // .cold (link-native.x): 600 Mohm / nS only
     fn average(&mut self, k: f32, floor: f32) -> f32 {
         let n = self.hn as usize;
         if n > 0 {
@@ -6076,7 +6077,6 @@ impl Dmm {
 
     /// Ohm r7, the experimental 600 Mohm (`OHM600`): one phase step per AD1
     /// result, a reading when both phases are in (~2 s at skip 2, keep 3).
-    #[inline(never)] // .cold (link-native.x): once per AD1 result in 600 Mohm / nS only
     fn poll_ohm600(&mut self, clk: &mut Clock) -> Option<Reading> {
         if !self.manual {
             // Not in the autorange (whatever released the manual range).
