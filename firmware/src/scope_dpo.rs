@@ -47,9 +47,11 @@ const HIT: u8 = 16;
 /// (round(200^(k/14)), k = 0..14).
 const LEVEL: [u8; 15] = [1, 2, 3, 4, 5, 7, 10, 14, 21, 30, 44, 64, 93, 136, 200];
 /// Display > Decay: the counts' time constant (ms; 0 = INF, no decay) and
-/// its names; index 1 (1 s) is the default.
-pub const DECAY_MS: [u32; 5] = [300, 1000, 3000, 10_000, 0];
-pub const DECAY_NAMES: [&str; 5] = ["0.3s", "1s", "3s", "10s", "INF"];
+/// its names; index 2 (1 s) is the default (0.1 s: owner 2026-11-22).
+pub const DECAY_MS: [u32; 6] = [100, 300, 1000, 3000, 10_000, 0];
+pub const DECAY_NAMES: [&str; 6] = ["0.1s", "0.3s", "1s", "3s", "10s", "INF"];
+/// The default's index (1 s).
+pub const DECAY_DEF: u8 = 2;
 
 fn level_of(c: u8) -> u8 {
     // (a plain loop: the iterator chain stays calls at opt-level "z")

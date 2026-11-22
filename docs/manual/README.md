@@ -1618,7 +1618,7 @@ the count on a log scale, so a single hit shows next to a trace hit in every
 frame. **DPO** uses CH1's colour in 15 brightness steps, **HOT** blue
 (rare) through green, yellow and orange to white (always). The **- / +**
 next to **Persist:** (shown with DPO / HOT) sets how fast a trace that is
-gone fades: **0.3s**, **1s** (default), **3s**, **10s** or **INF** (never).
+gone fades: **0.1s**, **0.3s**, **1s** (default), **3s**, **10s** or **INF** (never).
 On the fast timebases every
 triggered screen of a record is added, not only the shown one, so a rare
 event appears at once. A drag, a pinch, a settings change, roll and STOP

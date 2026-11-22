@@ -436,7 +436,7 @@ impl Sp {
             ch1_off: false,
             ch1_cur: false,
             hires: false,
-            decay: 1,
+            decay: crate::scope_dpo::DECAY_DEF,
             sel_v: 0,
             sel_h: 0,
             last_h: false,
@@ -3458,9 +3458,10 @@ impl App {
         // [5] bits 20..23: the GEN colour (PALETTE index XOR its default
         // cyan, so 0 = cyan in older records).
         p[5] |= ((su::gen_colour_idx() ^ su::GEN_COLOUR_DEFAULT) as u32 & 0xF) << 20;
-        // [5] bits 24..26: Display > Decay (scope_dpo::DECAY_MS index XOR
-        // its default 1 s, so 0 = 1 s in older records).
-        p[5] |= ((self.sp.decay ^ 1) as u32 & 7) << 24;
+        // [5] bits 24..26: Display > Decay as the 0.4.25 index (0.3 s .. INF,
+        // XOR its default 1 s, so 0 = 1 s in older records); 7 = 0.1 s (the
+        // new first entry, 0.4.26), so older records keep their value.
+        p[5] |= (if self.sp.decay == 0 { 7 } else { (self.sp.decay - 1) ^ 1 } as u32 & 7) << 24;
         // [5] bit 27: Trigger > Counter.
         p[5] |= (self.scope.fcnt.want as u32) << 27;
     }
@@ -3493,7 +3494,10 @@ impl App {
         self.sp.ch1_off = p[3] >> 13 & 1 != 0;
         self.sp.ch1_cur = p[3] >> 14 & 1 != 0;
         self.sp.hires = p[0] >> 21 & 1 != 0;
-        self.sp.decay = ((p[5] >> 24 & 7) as u8 ^ 1).min(crate::scope_dpo::DECAY_MS.len() as u8 - 1);
+        self.sp.decay = match (p[5] >> 24 & 7) as u8 {
+            7 => 0,
+            s => ((s ^ 1) + 1).min(crate::scope_dpo::DECAY_MS.len() as u8 - 1),
+        };
         if p[3] >> 15 & 1 != 0 && crate::scope_dpo::ENABLED {
             self.sp.persist = 4 + (self.sp.persist & 1);
         }

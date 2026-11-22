@@ -757,7 +757,7 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             save(out, "s08-ch2-func-a");
             // Persist DPO: Decay - / value / + right of the label (opendm40
             // 0.4.25); its taps, and Persist's own list keeps its hits.
-            for (dk, name) in [(1u8, "s08-dpo-decay"), (4, "s08-dpo-decay-inf"), (0, "s08-dpo-decay-short")] {
+            for (dk, name) in [(2u8, "s08-dpo-decay"), (5, "s08-dpo-decay-inf"), (1, "s08-dpo-decay-short"), (0, "s08-dpo-decay-min")] {
                 let mut pd = pv;
                 pd.persist = 4;
                 pd.decay = dk;

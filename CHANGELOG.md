@@ -50,7 +50,8 @@ official opendm40 release.
   Hi-res mean) and the measurements read the record four samples at a
   time (columns 5.1 -> 2.0 ms, measurements 16 -> 9 ms); the graph skips
   the columns with no change and its "nothing changed" test is cheaper;
-  the phosphor's decay uses a level table.
+  the phosphor's decay uses a level table. Display > Decay has **0.1s**
+  as well (owner).
 
 ### Removed
 
@@ -66,7 +67,8 @@ official opendm40 release.
 (страница диапазонов Ω) для сопротивлений до 100 ГОм. В генераторе появились AM и FM
 (поле под предпросмотром). Автовыбор диапазона быстрее: DC V / mV, DC A, AC V и Ω
 переходят сразу на нужный диапазон, а не по одному. DPO и HOT в осциллографе без ступенек
-(яркость смешивается между соседними ячейками) и без вертикальных полос, и кадр строится быстрее.
+(яркость смешивается между соседними ячейками) и без вертикальных полос, и кадр строится быстрее; затухание
+можно поставить 0.1s.
 
 ## v0.4.25-S2084 (2026-11-20)
 
