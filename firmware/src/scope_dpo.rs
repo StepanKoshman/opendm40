@@ -192,6 +192,27 @@ pub fn get_px(i: usize, fy: i16) -> u8 {
     level(((at(c0) * (8 - w) + at(c0 + 1) * w + 4) / 8) as u8)
 }
 
+/// Cell `c` of column `i` went from count `n` to `m` (stored): does a pixel
+/// row blended with it (`get_px`: its 4 rows' halves and its neighbours')
+/// change level? Only then it is repainted (owner 2026-11-21: repainting
+/// every changed count made DPO / HOT visibly slower). Each check is
+/// against the counts as they are now, so a chain of changes that each
+/// shows nothing leaves the drawn pixels right.
+#[inline(never)]
+fn shows(cnt: &[u8], i: usize, c: usize, n: u8, m: u8) -> bool {
+    let col = &cnt[i * NB..(i + 1) * NB];
+    let bl = |a: u8, b: u8, w: u32| level(((a as u32 * (8 - w) + b as u32 * w + 4) / 8) as u8);
+    for w in [1, 3, 5, 7] {
+        // (at the ends `get_px` clamps: the cell is its own neighbour)
+        let (p0, p1) = if c > 0 { (col[c - 1], col[c - 1]) } else { (n, m) };
+        let (q0, q1) = if c + 1 < NB { (col[c + 1], col[c + 1]) } else { (n, m) };
+        if bl(p0, n, w) != bl(p1, m, w) || bl(n, q0, w) != bl(m, q1, w) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Cell of frame row `fy` (rows from 1).
 #[inline]
 pub fn cell_of(fy: i16) -> usize {
@@ -241,15 +262,14 @@ pub fn hit(i: usize, a: i16, b: i16, h: i16, main: bool) {
     }
     let s = d();
     for c in cell_of(a)..=cell_of(b).min(NB - 1) {
-        let v = &mut cnt[i * NB + c];
-        let n = *v;
+        let n = cnt[i * NB + c];
         let m = if main { n.saturating_add(HIT) } else if n == 0 { HIT / 2 } else { n };
         if m != n {
-            *v = m;
-            // (a count change moves the interpolated rows around the cell:
-            // repainted, not only on a level change)
-            mark(&mut s.dirty[i], c);
-            s.any = true;
+            cnt[i * NB + c] = m;
+            if shows(cnt, i, c, n, m) {
+                mark(&mut s.dirty[i], c);
+                s.any = true;
+            }
         }
     }
 }
@@ -301,9 +321,10 @@ pub fn frame(tr: &[(i16, i16); su::NCOL], h: i16, now: u32, tau: u32) {
                 continue;
             }
             *v = n - dn;
-            // Any count change moves the rows blended with it (`get_px`).
-            mark(&mut s.dirty[i], j);
-            s.any = true;
+            if shows(cnt, i, j, n, n - dn) {
+                mark(&mut s.dirty[i], j);
+                s.any = true;
+            }
         }
     }
     #[cfg(all(target_os = "none", feature = "dbg-prof"))]
