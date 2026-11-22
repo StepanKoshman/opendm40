@@ -203,15 +203,18 @@ pub fn get_px(i: usize, fy: i16) -> u8 {
 #[inline(never)]
 #[cfg_attr(target_os = "none", link_section = ".text.a2.dpo_shows")]
 fn shows(cnt: &[u8], i: usize, c: usize, n: u8, m: u8) -> bool {
-    let col = &cnt[i * NB..(i + 1) * NB];
+    debug_assert!(i < su::NCOL && c < NB && cnt.len() >= su::NCOL * NB);
+    // (at the ends `get_px` clamps: the cell is its own neighbour)
+    // SAFETY: i < NCOL, c < NB (the callers' loops), the neighbours checked.
+    let (p0, p1) = if c > 0 { let v = unsafe { *cnt.get_unchecked(i * NB + c - 1) }; (v, v) } else { (n, m) };
+    let (q0, q1) = if c + 1 < NB { let v = unsafe { *cnt.get_unchecked(i * NB + c + 1) }; (v, v) } else { (n, m) };
     let bl = |a: u8, b: u8, w: u32| level(((a as u32 * (8 - w) + b as u32 * w + 4) / 8) as u8);
-    for w in [1, 3, 5, 7] {
-        // (at the ends `get_px` clamps: the cell is its own neighbour)
-        let (p0, p1) = if c > 0 { (col[c - 1], col[c - 1]) } else { (n, m) };
-        let (q0, q1) = if c + 1 < NB { (col[c + 1], col[c + 1]) } else { (n, m) };
+    let mut w = 1;
+    while w < 8 {
         if bl(p0, n, w) != bl(p1, m, w) || bl(n, q0, w) != bl(m, q1, w) {
             return true;
         }
+        w += 2;
     }
     false
 }
