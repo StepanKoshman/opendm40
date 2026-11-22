@@ -198,7 +198,10 @@ pub fn get_px(i: usize, fy: i16) -> u8 {
 /// every changed count made DPO / HOT visibly slower). Each check is
 /// against the counts as they are now, so a chain of changes that each
 /// shows nothing leaves the drawn pixels right.
+// Region A2 (zero-wait, the slack below the loader marker): region B
+// was short with it there.
 #[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.dpo_shows")]
 fn shows(cnt: &[u8], i: usize, c: usize, n: u8, m: u8) -> bool {
     let col = &cnt[i * NB..(i + 1) * NB];
     let bl = |a: u8, b: u8, w: u32| level(((a as u32 * (8 - w) + b as u32 * w + 4) / 8) as u8);
