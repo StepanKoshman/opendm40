@@ -403,11 +403,11 @@ SECTIONS
          * 2026-11-21, region B 0.5 KB short after the scope speed-up): the
          * helpers of poll_ohm600, once per AD1 result, only in those ranges
          * (no AD2 stream runs in ohm). poll_ohm600 itself (868 B) did not
-         * fit in C; ext (in plain loops) does. */
+         * fit in C, and ext stays in B: the release build (its version text)
+         * left C a few bytes short with it. */
         *(.text.*8opendm403dmm*6Ohm6007average*);
         *(.text.*8opendm403dmm*6Ohm6005learn*);
         *(.text.*8opendm403dmm*6Ohm6008decimals*);
-        *(.text.*8opendm403dmm*6Ohm6003ext*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);
