@@ -115,6 +115,7 @@ SECTIONS
     {
         __cold_start = .;
         *(.text.*8opendm409calbackup*);
+        *(.text.*8opendm409fat16conv*);
         *(.text.*8opendm406fatren*);
         /* dmm.rs load_record (the record copy and its CRC, once at
          * start-up, before any stream) and rec_crc_ok. */
@@ -139,6 +140,28 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* The frequency counter (MF > Trigger > Counter): its driver and
+         * Scope::fcnt_poll; App::scope_poll calls it only while no AD2 stream
+         * runs. */
+        *(.text.*8opendm404fcnt*);
+        *(.text.*8opendm405scope5Scope9fcnt_poll*);
+        *(.text.*8opendm408scope_ui7ctr_row*);
+        /* The generator's modulation (owner 2026-11-21): its plan and table
+         * (a settings change; SCPI SOUR:AM / FM while a stream runs is the
+         * host's own doing, as inrush_scpi), the Mod box and its page (the
+         * generator pages, where no stream runs). */
+        *(.text.*8opendm403gen4plan8mod_plan*);
+        *(.text.*8opendm403gen4plan8fill_mod*);
+        *(.text.*8opendm402ui11gen_mod_box*);
+        *(.text.*8opendm402ui12gen_mod_page*);
+        *(.text.*8opendm404scpi11gen_mod_cmd*);
+        *(.text.*8opendm403app*3App12scpi_gen_mod*);
+        *(.text.*8opendm403app*3App11gen_mod_tap*);
+        /* Start-up only: the settings restore (App::new, before any
+         * stream). */
+        *(.text.*8opendm403app*3App7restore*);
+        /* The keypad's OK (a tap on the Keypad view). */
+        *(.text.*8opendm403app*3App8kp_apply*);
         /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
          * loop and asm are `.text.a2.*` (zero-wait region A2). */
         *(.text.*8opendm408memprobe*);
@@ -172,17 +195,6 @@ SECTIONS
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
         *(.text.*8opendm403app10app_inrush*);
-        /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
-         * never open while the AD2 stream or a logger session runs (the page
-         * refuses to open then, closes when one starts; main.rs calls
-         * tt_poll only without a session). */
-        *(.text.*8opendm403app13app_touchtest*);
-        *(.text.*8opendm402ui9touchtest*);
-        /* The touch calibration's fit and checks (src/touchcal.rs): the
-         * touch test page, DBG:TOUCH:CAL and the settings restore at boot
-         * (the per-frame apply is touch.rs `screen`, region B). */
-        *(.text.*8opendm408touchcal*);
-        *(.text.*8opendm404scpi8tcal_arg*);
         /* The Record page's SCPI settings (LOG:CSV:INTerval / DURation /
          * CHANge): parse and set / query, rarely sent. */
         *(.text.*8opendm404scpi7csv_arg*);
@@ -258,9 +270,6 @@ SECTIONS
         *(.rodata.*8opendm404boot*);
         *(.rodata.*8opendm403app9app_press*);
         *(.rodata.*8opendm407fastlog4prep*);
-        *(.rodata.*8opendm403app13app_touchtest*);
-        *(.rodata.*8opendm402ui9touchtest*);
-        *(.rodata.*8opendm408touchcal*);
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct
@@ -294,6 +303,8 @@ SECTIONS
         /* The ohm / diode test-current label: drawn on a function / range /
          * variant change only (no AD2 stream runs in ohm / diode). */
         *(.text.*8opendm402ui18test_current_label*);
+        /* The diode's aux2 on the beeper band: drawn on a change only. */
+        *(.text.*8band_aux*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
@@ -369,9 +380,34 @@ SECTIONS
          * (scope_ui::init_shown) and the backup-SRAM record set-up
          * (persist::init, also splash / setfile::boot). */
         *(.text.*8opendm408scope_ui10init_shown*);
+        /* opendm40 fork 0.4.21: rarely run scope code out of region B (a
+         * Persist change, entering / leaving the wave view, the decoder's
+         * log start, a tap on the MF popup). */
+        *(.text.*8opendm405scope*9dpo_claim*);
+        *(.text.*8opendm405scope*10wave_enter*);
+        *(.text.*8opendm405scope*9wave_exit*);
+        *(.text.*8opendm405scope*9log_begin*);
+        *(.text.*8opendm409scope_dpo5clear*);
+        /* The phosphor's further screens of a record: the loops' work is
+         * in region B (pack10::min_max, scope_dpo::hit, find_trigger). */
+        *(.text.*8opendm405scope*8dpo_next*);
+        *(.text.*8opendm405scope*7hw_spin*);
+        *(.text.*11sp_dpo_more*);
+        *(.text.*8opendm408scope_ui6mf_hit*);
+        /* Its handler (App::sp_mf_tap): the same tap, after mf_hit. */
+        *(.text.*8opendm403app*3App9sp_mf_tap*);
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
+        /* The experimental 600 Mohm / 60 nS ranges' readout (owner
+         * 2026-11-21, region B 0.5 KB short after the scope speed-up): the
+         * helpers of poll_ohm600, once per AD1 result, only in those ranges
+         * (no AD2 stream runs in ohm). poll_ohm600 itself (868 B) did not
+         * fit in C, and ext stays in B: the release build (its version text)
+         * left C a few bytes short with it. */
+        *(.text.*8opendm403dmm*6Ohm6007average*);
+        *(.text.*8opendm403dmm*6Ohm6005learn*);
+        *(.text.*8opendm403dmm*6Ohm6008decimals*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);
@@ -429,7 +465,6 @@ SECTIONS
          * during a fast-log session reached it (fastlogtest --ui-nav;
          * region B since 2026-10-23, ~0.2 KB). */
         *(.text.*8opendm402ui9menu_item*);
-        *(.text.*8opendm402ui9help_page*);
         *(.text.*8opendm402ui9list_page*);
         *(.text.*8opendm402ui10page_title*);
         *(.text.*8opendm402ui11set_stepper*);

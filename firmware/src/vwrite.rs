@@ -305,6 +305,14 @@ pub fn set_read_only(on: bool) {
     w().want_rw = !on;
 }
 
+/// The mode kept over a restart (App::restore, at boot before a host has
+/// mounted the volume): asked for and in force at once.
+pub fn set_read_only_boot(on: bool) {
+    let w = w();
+    w.want_rw = !on;
+    w.rw = !on;
+}
+
 /// USB bus reset (msc.rs via vdisk::on_bus_reset), after `release_all`:
 /// the mode asked for is now in force. Host tests call it to apply a mode.
 pub fn on_bus_reset() {

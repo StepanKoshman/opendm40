@@ -43,9 +43,6 @@ mod app_ch2;
 mod app_inrush;
 #[path = "app_inrush_live.rs"]
 mod app_inrush_live;
-/// The touch test page (region C).
-#[path = "app_touchtest.rs"]
-mod app_touchtest;
 /// The protocol decoder view (region B: it runs while the scope streams).
 #[path = "app_decode.rs"]
 mod app_decode;
@@ -166,10 +163,9 @@ fn is_page(v: View) -> bool {
             | View::Limits
             | View::Record
             | View::Gallery
-            | View::Help
             | View::Inrush
-            | View::TouchTest
             | View::Decode
+            | View::GenMod
     )
 }
 
@@ -178,6 +174,11 @@ fn is_page(v: View) -> bool {
 const KP_T_OFFS: u8 = 6;
 const KP_NTC_R25: u8 = 7;
 const KP_NTC_BETA: u8 = 8;
+/// The generator's modulation page (View::GenMod): modulation frequency,
+/// AM depth, FM deviation.
+const KP_MOD_F: u8 = 9;
+const KP_AM_D: u8 = 10;
+const KP_FM_DEV: u8 = 11;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
 // The Record page's interval list: csvlog's indices, then "Fast".
@@ -242,8 +243,6 @@ pub struct App {
     /// A new NTC user R25 / Beta while that sensor is active: re-enter it
     /// (kp_apply has no clock).
     ntc_reenter: bool,
-    /// Help page shown (UF-29, ui::HELP index).
-    help_page: usize,
     /// Settings > Other "USB disk" as drawn (in force, asked for): a bus reset
     /// that applies the mode repaints the page.
     usb_ro_drawn: (bool, bool),
@@ -311,7 +310,7 @@ pub struct App {
     relay_next: u64,
     /// Scope measurement items: stock ids, `scope_meas::CH2` set for the
     /// DMM channel's.
-    meas_sel: [u8; 4],
+    meas_sel: [u8; crate::scope_meas::MAX_SEL],
     meas_n: usize,
     pub meas_res: crate::scope_meas::Results,
     /// The DMM channel's results (CH2), by stock id as `meas_res`.
@@ -711,7 +710,7 @@ impl App {
             host_scope: false,
             anti_drop: true,
             relay_next: 0,
-            meas_sel: crate::scope_meas::DEFAULT_SEL,
+            meas_sel: [0, 10, 9, 11, 0],
             meas_n: 4,
             meas_res: crate::scope_meas::Results { v: [f32::NAN; 20] },
             meas_res2: crate::scope_meas::Results { v: [f32::NAN; 20] },
@@ -752,7 +751,6 @@ impl App {
             pd6_raw: (false, 0, false),
             beep_until: 0,
             off_warned: 0,
-            help_page: 0,
             usb_ro_drawn: (true, true),
             tp_pressed: None,
             ntc_reenter: false,
@@ -900,7 +898,7 @@ impl App {
             View::Inrush => (true, false),
             // The decoder's frame log: the scope input; the DMM as it was.
             View::Decode => (self.scope.dmm_rail(), true),
-            View::Scope | View::Gen | View::Keypad => (false, true),
+            View::Scope | View::Gen | View::GenMod | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
@@ -962,11 +960,14 @@ impl App {
             }
             View::Scope => self.sp_draw_static(),
             View::Gen => ui::gen_static(&self.gen),
+            View::GenMod => ui::gen_mod_page(&self.gen),
             View::Keypad => {
                 if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
                 } else if self.kp_dmm() {
                     self.with_temp_page(None);
+                } else if self.kp_back() == View::GenMod {
+                    ui::gen_mod_page(&self.gen);
                 } else {
                     ui::gen_static(&self.gen);
                 }
@@ -1061,8 +1062,6 @@ impl App {
                 ui::settings(self.set_tab, &vals);
             }
             View::Gallery => crate::gallery::get().draw(),
-            View::Help => ui::help_page(self.help_page),
-            View::TouchTest => self.tt_draw(),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
@@ -1539,7 +1538,7 @@ impl App {
     fn kp_kind(&self) -> u8 {
         match self.kp_target {
             0 => ui::KP_FREQ,
-            1 | 2 | 5 | KP_NTC_R25 | KP_NTC_BETA => ui::KP_NUM,
+            1 | 2 | 5 | KP_NTC_R25 | KP_NTC_BETA | KP_MOD_F | KP_AM_D | KP_FM_DEV => ui::KP_NUM,
             _ => ui::KP_SIGNED,
         }
     }
@@ -1577,6 +1576,7 @@ impl App {
         match self.kp_target {
             3 | 4 => View::Limits,
             KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA => View::Range,
+            KP_MOD_F | KP_AM_D | KP_FM_DEV => View::GenMod,
             _ => View::Gen,
         }
     }
@@ -1588,7 +1588,6 @@ impl App {
     /// the host. The idle dim still runs on touches and keys alone, and host
     /// activity does not undim: nobody is necessarily looking at the screen,
     /// and a dimmed backlight costs the session nothing.
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     pub fn note_host_activity(&mut self, now: u64) {
         self.last_host = self.last_host.max(now);
     }
@@ -1663,7 +1662,7 @@ impl App {
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
-            View::Menu | View::Settings | View::Help | View::Gen | View::Scope => true,
+            View::Menu | View::Settings | View::Gen | View::Scope => true,
             View::Range => self.dmm.hy_mode() != 15 && !self.dmm.pw.on,
             _ => false,
         };
@@ -1828,12 +1827,7 @@ impl App {
                     self.persist_now();
                     power_off();
                 }
-                if self.view == View::TouchTest {
-                    // The touch test page's exit (its touches and touch
-                    // keys are shown, not used): no lock toggle.
-                    self.pd6_click = None;
-                    self.tt_close(clk);
-                } else if self.pd6_click.take().is_some() {
+                if self.pd6_click.take().is_some() {
                     self.locked = !self.locked;
                     self.status_next = 0;
                     self.beep(now, 150);
@@ -1874,12 +1868,6 @@ impl App {
         }
         if self.view == View::Settings && self.set_tab == ui::TAB_OTHER && self.usb_ro_drawn != usb_ro() {
             self.redraw = true;
-        }
-        // A host started a logger session or the stream: the touch test
-        // page (region C) closes.
-        if self.view == View::TouchTest && self.tt_conflict().is_some() {
-            self.set_tab = ui::TAB_OTHER;
-            self.show(View::Settings, clk);
         }
         self.fuse_tick(clk, now);
         self.pw_entry_tick(now, can_draw);
@@ -1972,7 +1960,7 @@ impl App {
                     }
                 }
                 View::Gen => ui::gen_status(&st),
-                View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
+                View::Keypad if !self.kp_dmm() && self.kp_back() == View::Gen => ui::gen_status(&st),
                 View::DmmScope => self.draw_reading(),
                 View::Range if self.temp_page_on() => self.temp_info_tick(false),
                 _ => {}
@@ -1986,7 +1974,7 @@ impl App {
             match self.view {
                 View::Dmm => ui::status_rec_blink(&st, false),
                 View::Gen => ui::status_rec_blink(&st, true),
-                View::Keypad if !self.kp_dmm() => ui::status_rec_blink(&st, true),
+                View::Keypad if !self.kp_dmm() && self.kp_back() == View::Gen => ui::status_rec_blink(&st, true),
                 _ => {}
             }
         }
@@ -2179,6 +2167,9 @@ impl App {
             KP_T_OFFS => crate::dmm::format(&mut t, self.dmm.t_offs(self.dmm.t_sensor()), 1),
             KP_NTC_R25 => trim_zeros(crate::dmm::format(&mut t, self.dmm.ntc_user().0 / 1000.0, 3)),
             KP_NTC_BETA => crate::dmm::format(&mut t, self.dmm.ntc_user().1, 0),
+            KP_MOD_F => trim_zeros(crate::dmm::format(&mut t, s.mod_hz, 2)),
+            KP_AM_D => crate::dmm::format(&mut t, s.am_depth as f32, 0),
+            KP_FM_DEV => crate::dmm::format(&mut t, s.fm_dev_hz, 0),
             _ => "",
         };
         let n = pre.len().min(self.kp_buf.len() - 1);
@@ -2202,11 +2193,16 @@ impl App {
             KP_T_OFFS => ("Offset", "\u{2103}"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
+            KP_MOD_F => ("Mod freq", "Hz"),
+            KP_AM_D => ("AM depth", "%"),
+            KP_FM_DEV => ("FM dev", "Hz"),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
             _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
     }
 
+    /// The keypad's OK (a tap on the Keypad view: no stream runs there).
+    #[inline(never)] // .cold (link-native.x)
     fn kp_apply(&mut self) {
         let n = self.kp_n;
         if self.kp_target == 5 && n == 0 {
@@ -2267,6 +2263,9 @@ impl App {
             }
             1 => st = st.with_amp(v),
             5 => st = st.with_offset(Some(v)),
+            KP_MOD_F => st.mod_hz = v,
+            KP_AM_D => st.am_depth = v.clamp(0.0, 100.0) as u8,
+            KP_FM_DEV => st.fm_dev_hz = v.max(0.0),
             _ => st.duty = (v.clamp(0.0, 100.0) * 100.0) as u16,
         }
         self.gen.apply(st);
@@ -2310,7 +2309,8 @@ impl App {
         for i in 0..4 {
             p[9] |= (self.meas_sel[i] as u32) << (8 * i);
         }
-        p[10] = self.meas_n as u32;
+        // Bits 8..15: the 5th item (opendm40; older firmware reads min(4)).
+        p[10] = self.meas_n as u32 | (self.meas_sel[4] as u32) << 8;
         // v3 words (0 = default everywhere): p[11] bit 0 rails "Both always",
         // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
         // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
@@ -2372,13 +2372,23 @@ impl App {
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
             | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
             | if self.cont_always { 0 } else { crate::meter::EXT_CONT_VOL }
+            // The USB disk mode asked for (owner 2026-11-12: kept).
+            | if usb_ro().1 { 0 } else { crate::meter::EXT_USB_RW }
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4 | (swap01(crate::csvlog::change()) as u32) << 8;
-        // v11: the touch calibration (touchcal.rs; 0 = none).
-        for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
-            *w = c as u32;
+        // p[64..67]: the generator's modulation (persist::W_GEN_MOD; the rest
+        // of the old touch calibration's words zero).
+        let w = crate::persist::W_GEN_MOD;
+        p[w] = crate::persist::GEN_MOD_TAG << 24
+            | gen::Mod::ALL.iter().position(|&m| m == g.modu).unwrap_or(0) as u32
+            | (g.am_depth as u32) << 8;
+        p[w + 1] = g.mod_hz.to_bits();
+        p[w + 2] = g.fm_dev_hz.to_bits();
+        // v12: the scope's zero calibration (scope.rs ZTRIM; 0 = none).
+        for (i, t) in scope::zero_trim().iter().enumerate() {
+            p[crate::persist::W_SCOPE_ZERO + i / 4] |= (*t as u8 as u32) << (8 * (i % 4));
         }
         p
     }
@@ -2407,7 +2417,7 @@ impl App {
     /// math and measurements, the power meter and the Record page. Otherwise
     /// only the preferences are restored (display, sound, power, BT, alerts,
     /// units, sensor, each function button's last sub-mode and the ohm test
-    /// current, scope look and touch, the touch calibration, the
+    /// current, scope look and touch, the scope's zero calibration, the
     /// generator's setup) and the rest keeps its defaults, as the stock
     /// after a power-on. Mode Remember ON (the stock's Other Settings
     /// switch; its record: function, coupling, autorange flags, ohm variant,
@@ -2418,6 +2428,7 @@ impl App {
     /// measurements (owner 2026-11-02). Not AutoHold, the limits, REL or
     /// HOLD (as the stock: they change what the readout shows, unnoticed
     /// after a power-on), nor the power meter's settings or the Record page.
+    #[inline(never)] // .cold (link-native.x): start-up only (App::new)
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
@@ -2431,6 +2442,9 @@ impl App {
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         self.cont_always = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_CONT_VOL == 0;
         crate::hy3131::set_beeper(self.volume > 0 || self.cont_always); // before the first DMM row
+        // The USB disk mode (Settings > Other): as it was left.
+        #[cfg(feature = "vdisk")]
+        crate::vwrite::set_read_only_boot(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_USB_RW == 0);
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
@@ -2521,14 +2535,22 @@ impl App {
         g.amp_v = if a.is_finite() { a.clamp(gen::AMP_MIN, gen::AMP_MAX) } else { 3.0 };
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
-        self.gen.s = g.normalised();
-        // v11: the touch calibration, a preference (0 = none; one that
-        // fails the checks reads as none).
-        let mut tc = [0i32; 6];
-        for (c, w) in tc.iter_mut().zip(&p[crate::persist::W_TOUCH_CAL..]) {
-            *c = *w as i32;
+        // p[64..67]: the modulation, with its tag (older records: zeros or
+        // the gone touch calibration, modulation off).
+        let w = crate::persist::W_GEN_MOD;
+        if p[w] >> 24 == crate::persist::GEN_MOD_TAG {
+            g.modu = gen::Mod::ALL[((p[w] & 3) as usize).min(2)];
+            g.am_depth = (p[w] >> 8) as u8;
+            g.mod_hz = f32::from_bits(p[w + 1]);
+            g.fm_dev_hz = f32::from_bits(p[w + 2]);
         }
-        app_touchtest::tc_restore(tc);
+        self.gen.s = g.normalised();
+        // v12: the scope's zero calibration, a preference (0 = none).
+        let mut zt = [0i8; 10];
+        for (i, t) in zt.iter_mut().enumerate() {
+            *t = (p[crate::persist::W_SCOPE_ZERO + i / 4] >> (8 * (i % 4))) as u8 as i8;
+        }
+        scope::set_zero_trim(zt);
         // The probe factor: a preference (the probe stays on the jack),
         // kept also without Mode Remember (owner 2026-11-03).
         let pr = f32::from_bits(p[8]);
@@ -2557,12 +2579,12 @@ impl App {
         // The saved level row is at the saved scale: its volts from there.
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
-        let n = (p[10] as usize).min(4);
+        let n = (p[10] as usize & 0xff).min(crate::scope_meas::MAX_SEL);
         // Only valid measurement ids (0..19, index into meas_res.v, with or
         // without the CH2 flag), no duplicates (review 7389e8a L1).
         let mut k = 0;
         for i in 0..n {
-            let id = (p[9] >> (8 * i)) as u8;
+            let id = if i < 4 { (p[9] >> (8 * i)) as u8 } else { (p[10] >> 8) as u8 };
             if crate::scope_meas::valid(id) && !self.meas_sel[..k].contains(&id) {
                 self.meas_sel[k] = id;
                 k += 1;
@@ -2804,6 +2826,10 @@ impl App {
             return;
         }
         self.sp_csv_poll(now);
+        // The frequency counter (fcnt.rs, region C: not under the AD2 stream).
+        if (self.scope.fcnt.want || self.scope.fcnt.running) && !crate::hy3131::streaming() {
+            self.scope.fcnt_poll(now);
+        }
         // The protocol decoder: a slice of a record decode (app_decode.rs).
         self.dec_step();
         // Drag / pinch on the scope page: no new frames and no acquisition
@@ -2837,6 +2863,21 @@ impl App {
         if !self.scope.acquiring() && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
             return;
         }
+        // The last frame is still being painted in slices (a busy trace at
+        // a fast timebase): finish it before taking the next record, else
+        // the slices draw a new record each and one screen shows parts of
+        // several (owner 2026-11-14, AM / FM at 100-200 ns/div: the trace
+        // broken where the slices met). The record waits in BUF.
+        // At most 32 passes held (a paint that never completes cannot stop
+        // the scope).
+        static HELD: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+        let held = HELD.load(core::sync::atomic::Ordering::Relaxed);
+        if page && !covered && held < 32 && crate::scope_ui::painting() && self.scope.may_wait() {
+            HELD.store(held + 1, core::sync::atomic::Ordering::Relaxed);
+            self.sp_paint_pass(now, covered);
+            return;
+        }
+        HELD.store(0, core::sync::atomic::Ordering::Relaxed);
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
@@ -2871,6 +2912,10 @@ impl App {
                 self.autoset_step(&f, now);
                 return;
             }
+            if scope_page::zero_cal_on() {
+                self.sp_zero_step(&f, now);
+                return;
+            }
             // A stopped scope only emits a frame on a change (a zoom, a V/div
             // rescale): always measure those, they do not repeat.
             let fresh = (now >= self.meas_next || !self.scope.s.run) && !f.data.is_empty();
@@ -2878,7 +2923,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope, self.sp.hires);
                 self.meas_res2 = if self.meas_ch2_wanted() { self.ch2_meas(&f) } else { crate::scope_meas::Results { v: [f32::NAN; 20] } };
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
@@ -2950,6 +2995,7 @@ impl App {
         self.sp_tick(now);
         self.sp.paint_due = false;
         crate::prof::exit(crate::prof::PAINT);
+        crate::prof::add(crate::prof::NPX, crate::scope_ui::graph().px.saturating_mul(200));
         // A long paint (a status change repaints the status badge and the
         // record bar, ~14 ms on the device model): the cell waits for the
         // next pass, so no pass stacks paint + cell (~10 ms) on top of the
@@ -3010,6 +3056,8 @@ impl App {
         self.gen.apply(s);
         if self.view == View::Gen {
             ui::gen_values(&self.gen);
+        } else if self.view == View::GenMod {
+            self.redraw = true;
         }
     }
 
@@ -3167,11 +3215,6 @@ impl App {
                 _ => {}
             }
             return false;
-        }
-        // The touch test page shows touches and keys, it does not act on
-        // them (app_touchtest.rs).
-        if self.view == View::TouchTest {
-            return self.tt_gesture(g);
         }
         if self.view == View::Decode {
             if let Some(c) = self.log_gesture(clk, g) {
@@ -3686,11 +3729,11 @@ impl App {
                 // pop to the view they were opened from.
                 let v = match self.view {
                     View::Device => View::Menu,
-                    View::Help => View::Settings,
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
+                    View::GenMod => View::Gen,
                     View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
                 };
@@ -3699,7 +3742,7 @@ impl App {
             1 => match self.view {
                 // The inrush page: RUN = Arm / Cancel.
                 View::Inrush => self.inrush_button(clk),
-                View::Gen => {
+                View::Gen | View::GenMod => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
                     self.gen_set(st);
@@ -3720,7 +3763,7 @@ impl App {
             // The generator's Signal page (and its keypad) has no AUTO
             // function: the key does nothing there (it used to set the
             // DMM's autorange).
-            2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
+            2 if matches!(self.view, View::Gen | View::GenMod) || (self.view == View::Keypad && !self.kp_dmm()) => {}
             // V / A / ohm: the range step on release, the autorange when held
             // (auto_key_end).
             2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
@@ -3793,6 +3836,28 @@ impl App {
         self.redraw |= matches!(self.view, View::Range | View::Limits);
     }
 
+    /// A tap on the modulation page (View::GenMod): Back, the mode (Off /
+    /// AM / FM), the three keypads.
+    #[inline(never)] // .cold (link-native.x): the generator pages, no stream
+    fn gen_mod_tap(&mut self, clk: &mut Clock, y: u16) {
+        if ui::title_back_hit(y) {
+            self.show(View::Gen, clk);
+            return;
+        }
+        match ui::list_hit(y, ui::MOD_ROWS.len()) {
+            Some(0) => {
+                let mut st = self.gen.s;
+                let k = gen::Mod::ALL.iter().position(|&m| m == st.modu).unwrap_or(0);
+                st.modu = gen::Mod::ALL[(k + 1) % 3];
+                self.gen_set(st);
+            }
+            Some(1) => self.kp_open(KP_MOD_F, clk),
+            Some(2) => self.kp_open(KP_AM_D, clk),
+            Some(3) => self.kp_open(KP_FM_DEV, clk),
+            _ => {}
+        }
+    }
+
     #[inline(never)] // .cold (link-native.x): on a tap
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
@@ -3828,8 +3893,6 @@ impl App {
                 }
             }
             View::Gallery => {} // gestures go to gallery::touch (App::gesture)
-            // Gestures go to app_touchtest.rs (App::gesture).
-            View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
             // (The frame log handles its own taps: app_log.rs.)
             View::Decode => {}
@@ -3837,16 +3900,6 @@ impl App {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
                 self.show(View::Settings, clk);
-            }
-            View::Help => {
-                // Title bar: back to Settings > Other (as MENU); elsewhere: the
-                // next help page (wraps).
-                if ui::title_back_hit(y) {
-                    self.show(View::Settings, clk);
-                } else {
-                    self.help_page = (self.help_page + 1) % ui::HELP.len();
-                    self.redraw = true;
-                }
             }
             View::Keypad => {
                 let freq = self.kp_target == 0;
@@ -3898,7 +3951,8 @@ impl App {
                         let digits = self.kp_buf[..self.kp_n].iter().filter(|d| d.is_ascii_digit()).count();
                         let ok = match self.kp_target {
                             0 => self.kp_n < 7,
-                            1 | 2 | 5 | KP_NTC_BETA => self.kp_n < 5,
+                            1 | 2 | 5 | KP_NTC_BETA | KP_AM_D => self.kp_n < 5,
+                            KP_MOD_F | KP_FM_DEV => self.kp_n < 8,
                             KP_T_OFFS => self.kp_n < 5,
                             KP_NTC_R25 => self.kp_n < 7,
                             _ => c == b'.' || digits < 5,
@@ -4076,6 +4130,9 @@ impl App {
                 } else if ui::gen_wave_hit(x, y) {
                     let k = Wave::ALL.iter().position(|&w| w == st.wave).unwrap_or(0);
                     st.wave = Wave::ALL[(k + 1) % 4];
+                } else if ui::gen_mod_hit(x, y) {
+                    self.show(View::GenMod, clk);
+                    return;
                 } else if let Some(b) = ui::gen_box_hit(x, y) {
                     // Frequency, Vpp, Offset, Duty (square only, any f).
                     match b {
@@ -4094,6 +4151,7 @@ impl App {
                 // so cycling back to Square restores it.
                 self.gen_set(st);
             }
+            View::GenMod => self.gen_mod_tap(clk, y),
             View::Menu => match ui::main_menu_hit(x, y) {
                 Some(0) => self.show(View::Dmm, clk),
                 Some(1) => self.show(View::Scope, clk),
@@ -4272,11 +4330,6 @@ impl App {
                             _ => TAP_CORNERS,
                         };
                     }
-                    ui::S_HELP => {
-                        self.help_page = 0;
-                        self.show(View::Help, clk);
-                        return;
-                    }
                     ui::S_JACK => {
                         // Jack alerts: ON (all) -> A-JACK only -> OFF -> ON.
                         use crate::sentinel::{M_AJACK, M_JACK};
@@ -4294,8 +4347,9 @@ impl App {
                     }
                     ui::S_USB => {
                         // USB disk (decision 2026-10-22 #6): Files live <->
-                        // PC can edit, volatile; in force at the next bus
-                        // reset (the host reads the WP bit when it mounts).
+                        // PC can edit; in force at the next bus reset (the
+                        // host reads the WP bit when it mounts). Kept over
+                        // a restart (this fork, owner 2026-11-12).
                         let ro = !usb_ro().1;
                         #[cfg(feature = "vdisk")]
                         crate::vwrite::set_read_only(ro);
@@ -4313,10 +4367,6 @@ impl App {
                     }
                     ui::S_DEVICE => {
                         self.show(View::Device, clk);
-                        return;
-                    }
-                    ui::S_TOUCH => {
-                        self.tt_open(clk);
                         return;
                     }
                     ui::S_ACC => {
@@ -4618,6 +4668,7 @@ impl App {
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
             // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
             // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ns(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e-11),
             Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
             Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
@@ -4808,7 +4859,6 @@ impl App {
     /// channels' tuning replies): region C (link-native.x), out of
     /// `scpi_dmm`'s frame.
     #[inline(never)]
-    #[cfg(feature = "dbg-dev")]
     fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
         match cmd {
@@ -5098,17 +5148,14 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgReadout => {
                 // Emulator tests (ohmhunt, autowaittest, switchtest): what
                 // the DMM readout draws now, whatever the view.
@@ -5137,15 +5184,6 @@ impl App {
                 });
                 true
             }
-            C::DbgTouchTest(on) => self.tt_scpi(clk, on, out),
-            C::DbgTouchCal(op) => {
-                // A change redraws the touch test page (its Cal lines).
-                if op != 0 && self.view == View::TouchTest {
-                    self.redraw = true;
-                }
-                app_touchtest::tc_scpi(op, out)
-            }
-            #[cfg(feature = "dbg-dev")]
             C::DbgView => {
                 // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;
@@ -5157,7 +5195,6 @@ impl App {
                 crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgGest => {
                 // n;target,axis,delta,ms;... oldest first.
                 crate::put_u32(out, self.gest_n as u32);
@@ -5226,12 +5263,10 @@ impl App {
                 out.put_u32(self.dmm.alert_mask() as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(Some(v)) => {
                 self.dmm.set_sent_variant(clk, v);
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentVar(None) => {
                 out.put_u32(crate::sentinel::variant() as u32);
                 true
@@ -5254,7 +5289,6 @@ impl App {
                 out.put_u32(self.volume as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgAlarm => {
                 let a = &self.alarm;
                 for (i, v) in [a.sounding() as u32, a.silenced() as u32, a.events, self.alarm_mode as u32].into_iter().enumerate() {
@@ -5287,19 +5321,15 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(Some(ms)) => {
                 self.dmm.precond_ms = ms;
                 false
             }
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentPrec(None) => {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
-            #[cfg(feature = "dbg-dev")]
             c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
-            #[cfg(feature = "dbg-dev")]
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5386,6 +5416,58 @@ impl App {
         Some(r)
     }
 
+    /// SOUR:AM|FM:* (the generator's modulation, gen::Mod; one of AM / FM
+    /// at a time): set `g` (None, the caller applies it) or reply (Some).
+    #[inline(never)] // .cold (link-native.x): one SCPI command
+    fn scpi_gen_mod(&self, cmd: crate::scpi::Cmd, g: &mut gen::Settings, out: &mut crate::scpi::Scpi) -> Option<()> {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::GenModState(k, Some(on)) => {
+                let m = gen::Mod::ALL[k as usize % 3];
+                if on {
+                    g.modu = m;
+                } else if g.modu == m {
+                    g.modu = gen::Mod::Off;
+                }
+                None
+            }
+            C::GenModState(k, None) => {
+                out.put_bytes(if g.modu == gen::Mod::ALL[k as usize % 3] { b"1" } else { b"0" });
+                Some(())
+            }
+            C::GenModFreq(Some(f)) => {
+                g.mod_hz = f;
+                None
+            }
+            C::GenModFreq(None) => {
+                // The actual one while modulated (carrier / K), else the set.
+                let o = &self.gen.out;
+                out.put_f32(if o.mod_hz > 0.0 { o.mod_hz } else { g.mod_hz });
+                Some(())
+            }
+            C::GenAmDepth(Some(d)) => {
+                g.am_depth = d.clamp(0.0, 100.0) as u8;
+                None
+            }
+            C::GenAmDepth(None) => {
+                out.put_f32(g.am_depth as f32);
+                Some(())
+            }
+            C::GenFmDev(Some(d)) => {
+                g.fm_dev_hz = d;
+                None
+            }
+            C::GenFmDev(None) => {
+                // The deviation used while FM runs (limited around the
+                // carrier), else the set one.
+                let o = &self.gen.out;
+                out.put_f32(if o.fm_dev > 0.0 { o.fm_dev } else { g.fm_dev_hz });
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     /// SCPI scope / generator command. Writes the reply (if any) to `out` and
     /// returns true when there is one. Never inlined into main.rs `run`
     /// (one call site: LLVM may otherwise fold its ~10 KB into the hot loop's
@@ -5403,7 +5485,21 @@ impl App {
         let mut g = self.gen.s;
         let mut sc = self.scope.s;
         let scope_cmd =
-            !matches!(cmd, C::GenFunc(_) | C::GenFreq(_) | C::GenVolt(_) | C::GenOffs(_) | C::GenDuty(_) | C::GenOut(_) | C::DiagDac | C::DiagPwm);
+            !matches!(
+                cmd,
+                C::GenFunc(_)
+                    | C::GenFreq(_)
+                    | C::GenVolt(_)
+                    | C::GenOffs(_)
+                    | C::GenDuty(_)
+                    | C::GenOut(_)
+                    | C::GenModState(..)
+                    | C::GenModFreq(_)
+                    | C::GenAmDepth(_)
+                    | C::GenFmDev(_)
+                    | C::DiagDac
+                    | C::DiagPwm
+            );
         if self.scope.wave_on() && matches!(cmd, C::ChScale(Some(_)) | C::ChCoup(Some(_)) | C::DbgHwTrig(..)) {
             // MCX-only settings (front-end range, coupling, comparator):
             // leave the wave view. Timebase, trigger, RUN / STOP and the
@@ -5475,6 +5571,8 @@ impl App {
                 out.put_bytes(if g.on { b"1" } else { b"0" });
                 Some(())
             }
+            // Modulation (gen::Mod): App::scpi_gen_mod (region C).
+            C::GenModState(..) | C::GenModFreq(_) | C::GenAmDepth(_) | C::GenFmDev(_) => self.scpi_gen_mod(cmd, &mut g, out),
             C::TimScale(Some(t)) => {
                 sc.tb = scope::SDIV
                     .iter()
@@ -5653,7 +5751,6 @@ impl App {
             }
             // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
-            #[cfg(feature = "dbg-dev")]
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;
                 let put_i = |out: &mut crate::scpi::Scpi, v: i64| {

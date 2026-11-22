@@ -67,6 +67,8 @@ mod gen;
 mod gesture;
 #[path = "../../src/hwtrig.rs"]
 mod hwtrig;
+#[path = "../../src/fcnt.rs"]
+mod fcnt;
 #[path = "../../src/hy3131.rs"]
 mod hy3131;
 #[path = "../../src/hy3131_tables.rs"]
@@ -87,7 +89,11 @@ mod scope_meas;
 mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+#[path = "../../src/scope_dpo.rs"]
+mod scope_dpo;
 mod scope_add;
+mod dpo_ui;
+mod wide_ui;
 #[path = "../../src/decode.rs"]
 mod decode;
 mod decode_ui;
@@ -98,8 +104,6 @@ mod stock;
 mod stockfont;
 #[path = "../../src/touch.rs"]
 mod touch;
-#[path = "../../src/touchcal.rs"]
-mod touchcal;
 #[path = "../../src/ui.rs"]
 mod ui;
 // The boot splash (a native.rs submodule in the firmware).
@@ -674,6 +678,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
         ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
         ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
+        // The nS range (r8): two decimals, "nS EXP".
+        ("ohm_ns", Reading { range: dmm::OHMNS, auto: false, ..rd(10, val(-12.34, 2, "nS"), None, None, false) }, None),
+        ("ohm_ns_ol", Reading { range: dmm::OHMNS, auto: false, ..rd(10, ol(2, "nS"), None, None, false) }, None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.
@@ -1001,132 +1008,6 @@ fn page_regions_pw() -> Vec<(&'static str, Bx)> {
     vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))]
 }
 
-/// The touch test page (src/ui_touchtest.rs) in state `k`: 0 just opened,
-/// 1 after taps on every target with a scale error (the reported point
-/// moves right / down with x / y, up to +11 / +18 px, as measured on a
-/// panel with tools/touch-tap-check.py) and a short drag, 2 the touch keys
-/// (MENU and AUTO held) and a hold under way. `long`: the widest texts.
-pub fn touchtest_scene(k: u8, long: bool) {
-    use touch::Point;
-    use ui::touchtest as tt;
-    tt::page();
-    let mut lines = ["Raw: touch a target", "Tap -", "", "Frames 0  max 0 pts", "Stale 0  Bad 0"];
-    if long {
-        lines = ["Raw 479,319  5 pts", "Tap 479,319", "Off -239,-159 to 240,160", "Frames 9999999  max 5 pts", "Stale 9999999  Bad 9999999"];
-    } else if k > 0 {
-        lines = ["Raw 470,317  1 pt", "Tap 470,317", "Off +11,+18 to 459,299", "Frames 1342  max 2 pts", "Stale 61  Bad 0"];
-    }
-    for (i, t) in lines.iter().enumerate() {
-        tt::line(i, t);
-    }
-    if k >= 1 {
-        let off = |x: u16, y: u16| Point { x: x + (11 * (x as u32 - 20) / 439) as u16, y: y + (18 * (y as u32 - 20) / 279) as u16 };
-        for (i, &(x, y)) in tt::TARGETS.iter().enumerate() {
-            let p = off(x, y);
-            for j in 0..6u16 {
-                // A finger landing: the first frames a few px off.
-                let q = Point { x: p.x + (j * 7 + i as u16) % 4, y: p.y + (j * 5 + i as u16) % 3 };
-                tt::dot(Point { x: q.x.min(479), y: q.y.min(319) }, tt::DOT_RAW, tt::C_RAW);
-                if j >= 1 {
-                    tt::dot(Point { x: q.x.min(479), y: q.y.min(319) }, tt::DOT_DEB, tt::C_DEB);
-                }
-            }
-            tt::cross(Point { x: p.x.min(479), y: p.y.min(319) });
-        }
-        for j in 0..20u16 {
-            let p = Point { x: 300 + j * 6, y: 150 + j * 2 };
-            tt::dot(p, tt::DOT_RAW, tt::C_RAW);
-            if j % 3 != 0 {
-                tt::dot(p, tt::DOT_DEB, tt::C_DEB);
-            }
-        }
-    }
-    if k >= 2 {
-        tt::key(0, true, Some(372));
-        tt::key(1, false, Some(628));
-        tt::key(2, true, Some(884));
-        tt::key(3, false, Some(1140));
-        tt::hint(true);
-    }
-    if long {
-        for c in 0..4 {
-            tt::key(c, c % 2 == 0, Some(65535));
-        }
-    }
-    // The calibration in use: none; the widest coefficients (long).
-    tt::cal_status(if long { Some([1.15, -0.15, -159.9, -0.15, 0.85, 159.9]) } else { None });
-}
-
-/// This unit's map raw -> screen (a fit of 44 DBG:TOUCH? taps) and taps of
-/// it: per target two raw points (the inverse map, +-5 px of scatter).
-const TC_UNIT: [f64; 6] = [0.9961, 0.0101, -5.65, 0.0061, 0.9523, 0.70];
-
-fn tc_taps(wild: bool) -> (Vec<(i16, i16)>, Vec<(i16, i16)>) {
-    use ui::touchtest as tt;
-    let k = TC_UNIT;
-    let det = k[0] * k[4] - k[1] * k[3];
-    let (mut raw, mut tgt) = (vec![], vec![]);
-    for (i, &(tx, ty)) in tt::TARGETS.iter().enumerate() {
-        for j in 0..2i32 {
-            let (u, v) = (tx as f64 - k[2], ty as f64 - k[5]);
-            let x = (k[4] * u - k[1] * v) / det + ((i as i32 * 7 + j * 3) % 11 - 5) as f64;
-            let y = (-k[3] * u + k[0] * v) / det + ((i as i32 * 5 + j * 4) % 11 - 5) as f64;
-            raw.push((x.round() as i16, y.round() as i16));
-            tgt.push((tx as i16, ty as i16));
-        }
-    }
-    if wild {
-        raw[9].0 += 38;
-        raw[9].1 -= 30;
-    }
-    (raw, tgt)
-}
-
-/// The touch test page's calibration screens (app_touchtest.rs): `k` 0 the
-/// walk at point 5, tap 2, after a refused tap (its raw dots); 1 the result
-/// of a good fit with the taps' raw / corrected dots; 2 a refused fit; 3
-/// the page after Save (the coefficients in the F14 lines). `long`: the
-/// widest texts.
-pub fn touchcal_scene(k: u8, long: bool) {
-    use touch::Point;
-    use ui::touchtest as tt;
-    match k {
-        0 => {
-            tt::cal_page();
-            tt::cal_target(4, true);
-            tt::cal_step(if long { 8 } else { 4 }, if long { 1 } else { 0 }, 2);
-            tt::cal_msg(if long { "Too far from the cross" } else { "Taps differ: tap again" }, true);
-            let (raw, _) = tc_taps(false);
-            for &(x, y) in raw[..9].iter() {
-                tt::dot(Point { x: x.clamp(0, 479) as u16, y: y.clamp(0, 319) as u16 }, tt::DOT_RAW, tt::C_RAW);
-            }
-        }
-        1 | 2 => {
-            let (raw, tgt) = tc_taps(k == 2);
-            let f = touchcal::fit(&raw, &tgt, &tt::TARGETS).expect("fit");
-            if long {
-                let bad = if k == 2 { Some(touchcal::Bad::Resid.text()) } else { None };
-                tt::result_page(250, 250, 999, &[1.15, -0.15, -159.9, -0.15, 0.85, 159.9], bad);
-            } else {
-                tt::result_page(f.mean, f.max, f.before, &touchcal::to_f32(&f.cal), f.bad.map(|b| b.text()));
-            }
-            for &(x, y) in raw.iter() {
-                tt::dot(Point { x: x.clamp(0, 479) as u16, y: y.clamp(0, 319) as u16 }, tt::DOT_RAW, tt::C_RAW);
-                let (cx, cy) = touchcal::apply16(&f.cal, x as i32, y as i32);
-                tt::dot(Point { x: ((cx + 8) >> 4).clamp(0, 479) as u16, y: ((cy + 8) >> 4).clamp(0, 319) as u16 }, tt::DOT_DEB, tt::C_DEB);
-            }
-        }
-        _ => {
-            touchtest_scene(0, long);
-            let (raw, tgt) = tc_taps(false);
-            let f = touchcal::fit(&raw, &tgt, &tt::TARGETS).expect("fit");
-            if !long {
-                tt::cal_status(Some(touchcal::to_f32(&f.cal)));
-            }
-        }
-    }
-}
-
 /// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
 /// in a batch over an arbitrary previous screen ends pixel-identical to the
 /// page drawn directly.
@@ -1139,7 +1020,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
         (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
         (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
-        (ui::S_REMEMBER, "OFF"), (ui::S_CONT, "Always"),
+        (ui::S_REMEMBER, "OFF"),
     ] {
         v[id as usize] = t;
     }
@@ -1157,7 +1038,6 @@ fn set_vals_worst() -> Vec<&'static str> {
         (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
         (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
-        (ui::S_CONT, "With volume"),
     ])
 }
 
@@ -1210,15 +1090,16 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
 }
 
 /// The generator page's square preview (ui::gen_preview: x 4..243, high
-/// level at row 143, low at 258) is high in `duty` of its columns.
+/// level at row 131, low at 223: the 185-row preview over the Mod box) is
+/// high in `duty` of its columns.
 fn gen_duty_check(ck: &mut Checker, duty: u16) {
     const TRACE: u16 = 0x04A9;
     let fb = &host::emu().fb;
     let at = |x: usize, y: usize| fb[y * W + x] == TRACE;
     let (mut hi, mut lo) = (0, 0);
     for x in 5..242 {
-        hi += at(x, 143) as usize;
-        lo += at(x, 258) as usize;
+        hi += at(x, 131) as usize;
+        lo += at(x, 223) as usize;
     }
     let share = hi as f32 / (hi + lo).max(1) as f32;
     ck.cases += 1;
@@ -1670,6 +1551,8 @@ fn main() {
 
     // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
+    dpo_ui::run(&mut ck, &out);
+    wide_ui::run(&mut ck, &out);
     // 0d. The protocol decoder view (ui_decode.rs).
     decode_ui::run(&mut ck, &out);
 
@@ -2505,7 +2388,7 @@ fn main() {
         (gen::Wave::Sine, 1, 0.5, None, 5000, true),
     ];
     for (k, (wave, f, amp, offs, duty, on)) in gcases.iter().enumerate() {
-        let g = gen::Settings { on: *on, wave: *wave, freq_hz: *f, amp_v: *amp, duty: *duty, offset_v: *offs };
+        let g = gen::Settings { on: *on, wave: *wave, freq_hz: *f, amp_v: *amp, duty: *duty, offset_v: *offs, ..gen::Settings::DEFAULT };
         w.gen.apply(g);
         host::reset(0);
         ui::gen_static(&w.gen);
@@ -2531,6 +2414,27 @@ fn main() {
             ui::keypad_key(ui::KP_NUM, b'5', true);
             save(&out, "g04-keypad-vpp-sel");
         }
+    }
+    // 6a'. Modulation (owner 2026-11-21): the Mod box (AM raised to fit the
+    //      table, FM with a limited deviation, n/a on the PWM square, the
+    //      widest texts) and the modulation page.
+    let mods: [(gen::Wave, u32, gen::Mod, f32, u8, f32); 4] = [
+        (gen::Wave::Sine, 10_000, gen::Mod::Am, 10.0, 100, 0.0),
+        (gen::Wave::Sine, 45_000, gen::Mod::Fm, 1000.0, 50, 20_000.0),
+        (gen::Wave::Square, 2_000_000, gen::Mod::Fm, 100.0, 50, 1000.0),
+        (gen::Wave::Triangle, 33_333, gen::Mod::Fm, 12_345.6, 50, 16_666.0),
+    ];
+    for (k, (wave, f, md, fm, depth, dev)) in mods.iter().enumerate() {
+        let g = gen::Settings { on: true, wave: *wave, freq_hz: *f, modu: *md, mod_hz: *fm, am_depth: *depth, fm_dev_hz: *dev, ..gen::Settings::DEFAULT };
+        w.gen.apply(g);
+        host::reset(0);
+        ui::gen_static(&w.gen);
+        ck.check_opts(&format!("gen-mod/{k}"), &gen_regions, false);
+        save(&out, &format!("g06-gen-mod{k}"));
+        host::reset(0);
+        ui::gen_mod_page(&w.gen);
+        ck.check_opts(&format!("gen-mod-page/{k}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))], false);
+        save(&out, &format!("g07-gen-mod-page{k}"));
     }
     w.gen.apply(gen::Settings::DEFAULT);
     for title in ["Hold & Limits: Temperature", "Settings", "Hold & Limits: Capacitance"] {
@@ -2861,49 +2765,6 @@ fn main() {
         }
     }
 
-    // 6f. Help pages (UF-29): whole page; every text fits its column.
-    for page in 0..ui::HELP.len() {
-        host::reset(0);
-        ui::help_page(page);
-        ck.check_opts(&format!("help/{page}"), &page_regions, false);
-        for (a, b) in ui::HELP[page].1.iter() {
-            ck.cases += 1;
-            let (wa, wb) = (stockfont::text_width(stockfont::TEXT22, a, 0), stockfont::text_width(stockfont::TEXT22, b, 0));
-            if wa > ui::HELP_COL - ui::HELP_GAP || wb > 464 - 15 - ui::HELP_COL {
-                ck.fail(&format!("help/{page}"), format!("too wide: {a:?} {wa} / {b:?} {wb}"));
-            }
-        }
-        save(&out, &format!("m05-help{page}"));
-    }
-
-    // 6g. The touch test page (ui_touchtest.rs): just opened, with dots,
-    // keys lit and the hold hint, the widest texts. Targets, key boxes,
-    // legend, hint and Clear go through the layout rules; the dots and the
-    // touch-down crosses are data (not layout items).
-    for (k, long, name) in [(0u8, false, "t01-touchtest"), (1, false, "t02-touchtest-dots"), (2, false, "t03-touchtest-keys"), (0, true, "t04-touchtest-long")] {
-        host::reset(0);
-        touchtest_scene(k, long);
-        ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
-        save(&out, name);
-    }
-    // The calibration (app_touchtest.rs, touchcal.rs): the walk, a good fit,
-    // a refused fit, the page after Save; and their widest texts. The dots
-    // are data (not layout items).
-    for (k, long, name) in [
-        (0u8, false, "t05-touchcal-walk"),
-        (1, false, "t06-touchcal-result"),
-        (2, false, "t07-touchcal-refused"),
-        (3, false, "t08-touchcal-saved"),
-        (0, true, "t09-touchcal-walk-long"),
-        (1, true, "t10-touchcal-result-long"),
-        (2, true, "t11-touchcal-refused-long"),
-    ] {
-        host::reset(0);
-        touchcal_scene(k, long);
-        ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
-        save(&out, name);
-    }
-
     // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
     // energy reset, the firmware install question (vwrite.rs).
     for (k, f) in [("power-off", dialog::power_off as fn()), ("energy-reset", dialog::energy_reset), ("fw-install", dialog::fw_install)] {
@@ -2925,7 +2786,6 @@ fn main() {
         defer_check(&mut ck, &format!("defer/settings{tab}"), || ui::settings(tab, &sv));
     }
     defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
-    defer_check(&mut ck, "defer/help", || ui::help_page(0));
     defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
     defer_check(&mut ck, "defer/dmm", || {
         dv.draw_static(Button::Volt, 1, false, false);
@@ -2945,7 +2805,6 @@ fn main() {
         strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
     }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
-    strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
     // The generator page's first strip draw after a boot (#153), each wave
     // as the boot default: the preview's strip cache as the device has it
@@ -4093,9 +3952,6 @@ fn main() {
         ui::pw::settings_page(&pcs[0].1);
         ui::pw::job_dialog(dmm::pw::JOB_VCAL);
         save(&out, "p22-power-vcal-dialog");
-        host::reset(0);
-        ui::help_page(ui::HELP.len() - 1);
-        save(&out, "p23-help-power");
         host::reset(0);
         let mut dv = ui::DmmView::new();
         dv.power = true;

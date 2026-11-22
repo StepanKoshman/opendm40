@@ -254,7 +254,7 @@ fn main() {
 
     // ---- 6. Table contents.
     let mut tab = [0u16; N_MAX];
-    let base = Settings { on: true, freq_hz: 1000, amp_v: 3.0, duty: 5000, offset_v: None, wave: Wave::Ramp };
+    let base = Settings { on: true, freq_hz: 1000, amp_v: 3.0, duty: 5000, offset_v: None, wave: Wave::Ramp, ..Settings::DEFAULT };
     let t = plan(Wave::Ramp, 1000);
     fill(&mut tab, &base, &t);
     let l = t.len as usize;
@@ -383,6 +383,85 @@ fn main() {
     let s = Settings { on: true, freq_hz: 1_000_000, ..Settings::DEFAULT };
     let o = compute(&s);
     check!(loop_ticks(&o.timing) == (200, 1) && Shape::of(&s, &o).hi_v == PWM_HIGH_V, "PWM loop / level");
+
+    // ---- Modulation (owner 2026-11-21): one modulation period per table.
+    let mut tab = [0u16; N_MAX];
+    let am = Settings { on: true, wave: Wave::Sine, freq_hz: 10_000, amp_v: 2.0, offset_v: Some(1.5), modu: Mod::Am, mod_hz: 100.0, am_depth: 50, ..Settings::DEFAULT };
+    let o = compute(&am);
+    let t = o.timing;
+    check!(t.cycles == 100 && !o.mod_clamped, "AM 10 kHz / 100 Hz: K {}", t.cycles);
+    check!((o.hz() - 10_000.0).abs() < 0.01 && (o.mod_hz - 100.0).abs() < 0.001, "AM fc {} fm {}", o.hz(), o.mod_hz);
+    check!(t.len as u32 >= 100 * MOD_SPC && t.len as usize <= N_MAX, "AM table {}", t.len);
+    fill(&mut tab, &am, &t);
+    let l = t.len as usize;
+    // Envelope: around x = 1/4 (sin = 1) full 2 Vpp, around 3/4 a third of it.
+    let env = |a: usize, b: usize| {
+        let w = &tab[a..b];
+        (*w.iter().max().unwrap() as f32 - *w.iter().min().unwrap() as f32) * 3.0 / 4095.0
+    };
+    let per = l / 100;
+    let (e1, e3) = (env(l / 4 - per, l / 4 + per), env(3 * l / 4 - per, 3 * l / 4 + per));
+    check!((e1 - 2.0).abs() < 0.05 && (e3 - 2.0 / 3.0).abs() < 0.05, "AM envelope {e1} / {e3}");
+    let mean = tab[..l].iter().map(|&v| v as f64).sum::<f64>() / l as f64 * 3.0 / 4095.0;
+    check!((mean - 1.5).abs() < 0.01, "AM centre {mean}");
+    // The table wraps smoothly (the last sample next to the first).
+    // (one sample of a 20-sample carrier period at the envelope's middle:
+    // under 2 pi / 20 of the half span).
+    check!((tab[l - 1] as i32 - tab[0] as i32).abs() < 450, "AM wrap {} {}", tab[l - 1], tab[0]);
+    // A ratio above N_MAX / MOD_SPC: the modulation frequency goes up.
+    let o = compute(&Settings { mod_hz: 10.0, ..am });
+    check!(o.mod_clamped && o.timing.cycles == (N_MAX as u32 / MOD_SPC) as u16, "AM 10 kHz / 10 Hz: K {} clamped {}", o.timing.cycles, o.mod_clamped);
+    // FM: 10 kHz +- 2 kHz at 100 Hz; zero crossings count the frequency.
+    let fm = Settings { modu: Mod::Fm, fm_dev_hz: 2000.0, ..am };
+    let o = compute(&fm);
+    let t = o.timing;
+    check!((o.fm_dev - 2000.0).abs() < 0.01 && t.len as f32 >= t.cycles as f32 * MOD_SPC as f32 * 1.2, "FM table {} K {}", t.len, t.cycles);
+    fill(&mut tab, &fm, &t);
+    let l = t.len as usize;
+    let mid = (tab[..l].iter().map(|&v| v as u32).max().unwrap() + tab[..l].iter().map(|&v| v as u32).min().unwrap()) / 2;
+    let ups = |a: usize, b: usize| (a..b).filter(|&i| tab[i] as u32 <= mid && tab[(i + 1) % l] as u32 > mid).count();
+    // Whole table: K carrier periods (the phase is continuous over the wrap).
+    check!(ups(0, l) == t.cycles as usize, "FM periods {} of {}", ups(0, l), t.cycles);
+    // f = fc + dev cos(2 pi x): faster around x = 0 (12 kHz; the window
+    // over the wrap), slower around 1/2 (8 kHz).
+    let q = l / 8;
+    let (a, b) = (ups(0, q) + ups(l - q, l), ups(l / 2 - q, l / 2 + q));
+    check!(a > b && (a as f32 / b as f32 - 1.5).abs() < 0.25, "FM fast / slow {a} / {b}");
+    // The deviation stays under the carrier and the 50 kHz limit.
+    let o = compute(&Settings { freq_hz: 45_000, fm_dev_hz: 20_000.0, ..fm });
+    check!((o.fm_dev - (50_000.0 - o.hz() as f32)).abs() < 0.1 && (o.fm_dev - 5000.0).abs() < 10.0, "FM dev at 45 kHz {}", o.fm_dev);
+    // Every carrier / modulation pair: a valid table, the carrier within
+    // 0.1 %, the modulation = carrier / K as near the set one as K allows.
+    let mut worst = 0f64;
+    for wave in [Wave::Sine, Wave::Triangle, Wave::Square] {
+        for &fc in &[1u32, 7, 50, 333, 1000, 4567, 10_000, 33_333, 50_000] {
+            for &fm in &[0.1f32, 1.0, 9.7, 100.0, 1234.0, 25_000.0] {
+                for (md, dev) in [(Mod::Am, 0.0), (Mod::Fm, 0.3 * fc as f32)] {
+                    let st = Settings { on: true, wave, freq_hz: fc, mod_hz: fm, modu: md, fm_dev_hz: dev, ..Settings::DEFAULT };
+                    let o = compute(&st);
+                    let t = o.timing;
+                    let peak = 1.0 + o.fm_dev / o.hz() as f32;
+                    let ok = t.path == Path::Dac
+                        && t.div() >= 20
+                        && (t.len as usize) <= N_MAX
+                        && t.len as f32 >= t.cycles as f32 * MOD_SPC as f32 * peak
+                        && (o.hz() - fc as f64).abs() / fc as f64 <= 1e-3;
+                    check!(ok, "{wave:?} {md:?} fc {fc} fm {fm}: {t:?} fc {} peak {peak}", o.hz());
+                    let k = (fc as f32 / fm).round().max(1.0);
+                    if !o.mod_clamped {
+                        check!(t.cycles as f32 == k, "{wave:?} {md:?} fc {fc} fm {fm}: K {} not {k}", t.cycles);
+                    }
+                    worst = worst.max((o.hz() - fc as f64).abs() / fc as f64);
+                }
+            }
+        }
+    }
+    println!("modulation: carrier error at most {:.1} ppm", worst * 1e6);
+    // A square above 50 kHz (PWM) is not modulated; off: no modulation fields.
+    let o = compute(&Settings { wave: Wave::Square, freq_hz: 100_000, ..am });
+    check!(o.timing.path == Path::Pwm && o.mod_hz == 0.0, "PWM square: no modulation");
+    let o = compute(&Settings { modu: Mod::Off, ..am });
+    check!(o.mod_hz == 0.0 && !o.mod_clamped, "off");
 
     let fails = unsafe { FAILS };
     if fails == 0 {

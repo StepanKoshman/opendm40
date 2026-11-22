@@ -1880,7 +1880,7 @@ Firmware:
       **Device 0.3.0 mute (2026-10-27): PASS.** The probe glyph (DC x1, AC x1) equals
       [scope.png](../docs/manual/img/scope.png) / [scope-ch1.png](../docs/manual/img/scope-ch1.png) at RGB565.
       `VOLT:RANG?` 60 -> 6, `RES:RANG:AUTO?` 1, no error; a bare `RANG?` is -113 (the syntax needs `<f>:`).
-      Help 1/7 .. 7/7 open, the tap wraps to 1/7; 1/7 equals [help.png](../docs/manual/img/help.png).
+      Help 1/7 .. 7/7 open, the tap wraps to 1/7; 1/7 equals the manual's help.png (the help pages were removed in 0.4.26).
 - [x] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
       (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
       scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.

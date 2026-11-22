@@ -1362,11 +1362,17 @@ only through an address.
 
 ### Region B audit #11 (2026-11-03, dmm-trigger2)
 
+**Withdrawn the same day.** v0.4.12-sk1, which had this series in it, froze
+after being installed on a meter and then restarted; the 0.4.11-sk1 code
+(PR build 3866cd4, tested on the meter) ran. v0.4.15-S2084 is that code again,
+the series is out of the tree (it stays in git: commits 5d208c6 .. 995ead3),
+and its cause was not found. The text below describes what was tried.
+
 Room for the fork's DMM (CH2) trigger and what comes next, no change in
 function. [`rprof.py`](../tools/region-profile/rprof.py) on 0.4.11-sk1:
 region B 477 KB used (406 KB code, fonts 27 KB, texts 13 KB), region C
 7.2 KB free, so nothing more moves from B to C. New:
-[`inl.py`](../tools/region-profile/inl.py), the inlined copies per function
+`inl.py` (in commit 5448022), the inlined copies per function
 from the DWARF of the debug ELF (the `#[inline(never)]` candidates).
 Each row measured as its own commit's build:
 
@@ -1446,7 +1452,7 @@ stream ISR's paths:
 | `vdisk::STATE` | 372 | backup | SRAM `.dmabuf` | `init` (C); a few field loads per 512-byte sector in `read_block` / `read_busy` / `read_wait` |
 | `upload::UP` | 368 | backup | `.sram_bss` | per pass `active` flag; the upload is C (`begin`, `data_msg`, `flush`, `end`) |
 | `scope_csv::PLAN` | 264 | backup | SRAM `.dmabuf` | C only (`sp_save_csv`, `screenshot::step`) |
-| `app_touchtest::TT` | 168 | backup | `.sram_bss` | C only (the touch test page) |
+| ~~`app_touchtest::TT`~~ | 168 | backup | `.sram_bss` | removed in 0.4.26 with the touch test page |
 | `prof::P` (`dbg-prof` builds) | 984 | backup | `.sram_bss` | the profiler hooks (debug) |
 
 Proofs:
@@ -1499,8 +1505,7 @@ SRAM was already plain memory, kept over DBG:RESET, zero in a new run.
 the firmware starts, saves a setting, takes a screenshot, records a CSV
 long enough for several commits and a second 4 KiB block, reads its DLG
 and CSV with MMEM:DATA? and compares the CSV with
-[dlog.py](../tools/dlog.py) of the DLG byte for byte, opens the touch test
-page, then DBG:RESET: SETTINGS,BKP with the same record sequence number,
+[dlog.py](../tools/dlog.py) of the DLG byte for byte, then DBG:RESET: SETTINGS,BKP with the same record sequence number,
 the setting kept, and the same steps work again. The byte-written TAIL
 fails it.
 
@@ -1916,6 +1921,19 @@ never two live entries with the same name or a live entry on freed clusters.
 
 `fatren-dry-run` only reports.
 
+**The FAT12 disk of the later units** ([`src/fat16conv.rs`](../src/fat16conv.rs),
+before fatren). Units with the BoyaMicro BY25Q128ES come with a
+Windows-made FAT12 volume on the same 16 MiB (2 sectors per cluster, 1-block
+FATs, 2044 clusters), which no opendm40 disk writer takes ("No disk"). On
+the first boot it is made the DM40 FAT16 volume in place: the data blocks
+stay where they are (old cluster c = new clusters 2c-4, 2c-3), only blocks
+0..8 (boot sector, FATs, root) are rewritten, "System Volume Information"
+is dropped, the files are kept. Anything else on it (a subdirectory, a
+broken chain): nothing is written. `DBG:FLASH?` last field: 0 not FAT12,
+1 refused, 2 converted, 3 failed. Host test:
+[`tools/fat16conv-test/run.sh`](../tools/fat16conv-test/run.sh) (optionally
+with a real `SPIFLASH.BIN`).
+
 **Host test:** [`tools/fatren-test/run.sh`](../tools/fatren-test/run.sh). It uses mkfs.fat images in
 the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
 - **Rename** (update files are real packed images, `dm40fw.py pack`; the
@@ -1998,7 +2016,8 @@ INQUIRY product `DM40 files`. **Read-only by default** ("Files live",
 [decisions-2026-10-22](../../docs/history/decisions-2026-10-22.md) #6): the WP bit set, every WRITE fails DATA PROTECT
 07/27/00, a change goes out as a UNIT ATTENTION at once. Settings > Other
 "USB disk" = "PC can edit" (or `DBG:VDISK:RO 0`) asks for the writable
-volume: volatile (read-only again at every boot) and in force from the next
+volume: kept over a restart in this fork (persist word 38 bit 29; upstream:
+volatile, read-only again at every boot) and in force from the next
 USB bus reset (a re-plug; a host reads the WP bit when it mounts, so the
 mode never changes under a host); then a WRITE is judged sector by sector
 (`src/vwrite.rs`, "Host writes" below), anything not accepted fails DATA

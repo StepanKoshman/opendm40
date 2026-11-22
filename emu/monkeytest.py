@@ -365,11 +365,6 @@ def vwait(ms):
 def home_check():
     try:
         vwait(1500)
-        if L.q('DBG:VIEW?').startswith('Touch test'):
-            # The touch test page takes the side keys for its test; only a
-            # held power key leaves it (manual "Touch test").
-            L.q('DBG:TOUCH:TEST OFF')
-            vwait(500)
         for _ in range(4):
             v = L.q('DBG:VIEW?')
             if v.startswith('Main menu'):

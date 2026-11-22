@@ -25,8 +25,8 @@ mod plan;
 
 #[allow(unused_imports)]
 pub use plan::{
-    clamp_freq, compute, limits, loop_ticks, wrap, target_hz, Limits, Out, Path, Settings, Shape, Sync, Timing, Wave, AMP_MAX,
-    AMP_MIN, F_MAX, F_MIN, N_MAX, SQUARE_DAC_MAX, V_FS,
+    clamp_freq, compute, limits, loop_ticks, wrap, target_hz, Limits, Mod, Out, Path, Settings, Shape, Sync, Timing, Wave, AMP_MAX,
+    AMP_MIN, F_MAX, F_MIN, MOD_F_MAX, MOD_F_MIN, N_MAX, SQUARE_DAC_MAX, V_FS,
 };
 
 use crate::mmio::{modify32, r32, w32};
@@ -246,8 +246,11 @@ impl Gen {
             Path::Dac => self.dac(&s, &t),
         }
         self.real_hz = t.hz() as f32;
+        // The scope's GEN channel models a plain periodic wave: not a
+        // modulated one (its table is one modulation period).
+        let run = (!s.modulated()).then(|| (t, Shape::of(&s, &self.out)));
         // SAFETY: main loop only (the scope reads it from the main loop).
-        unsafe { *core::ptr::addr_of_mut!(RUNNING) = Some((t, Shape::of(&s, &self.out))) };
+        unsafe { *core::ptr::addr_of_mut!(RUNNING) = run };
     }
 
     fn pwm(&mut self, t: &Timing) {

@@ -671,6 +671,12 @@ UART (Modbus RTU frames recognised in it) and DALI on the scope page ([the decod
 | `SOURce:VOLTage:OFFSet[?]` | centre level, V, or `AUTO` | `+1.500000E+00` | both |
 | `SOURce:FUNCtion:SQUare:DCYCle[?]` | duty cycle, % (0 .. 100) | the duty produced: `+5.000000E+01` | both |
 | `OUTPut[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `SOURce:AM:STATe[?]` | `ON` or `OFF` (`ON` switches FM off) | `1` or `0` | both |
+| `SOURce:FM:STATe[?]` | `ON` or `OFF` (`ON` switches AM off) | `1` or `0` | both |
+| `SOURce:AM:DEPTh[?]` | AM depth, % (0 .. 100) | `+5.000000E+01` | both |
+| `SOURce:FM:DEViation[?]` | FM peak deviation, Hz | the deviation used (limited around the carrier while FM runs) | both |
+| `SOURce:AM:INTernal:FREQuency[?]` | modulation frequency, Hz (one for AM and FM) | the modulation frequency produced (carrier / a whole number) | both |
+| `SOURce:FM:INTernal:FREQuency[?]` | the same modulation frequency | as `SOURce:AM:INTernal:FREQuency?` | both |
 
 - A frequency of 0 or below, a negative amplitude or a duty outside 0 .. 100
   is `Data out of range`; the setting stays as it was.
@@ -857,8 +863,6 @@ unless shown otherwise.
 | `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
 | `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text. Only in builds with the `dbg-touch` feature. | USB |
-| `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
-| `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
 | `DBG:PROF[?]` | | Main loop timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:PROF:RESET` | | Clears the timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |

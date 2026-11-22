@@ -13,7 +13,22 @@
 pub trait Src {
     fn len(&self) -> usize;
     fn at(&self, i: usize) -> u16;
+    /// Codes i .. into `out` (as many as fit, to the end): how many. A
+    /// packed view reads them a group at a time (`Codes::read`); the
+    /// scope's measurements go through this (owner 2026-11-21: 16 ms a
+    /// 200 us/div screen with `at`).
+    #[inline(always)]
+    fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        let m = out.len().min(self.len().saturating_sub(i));
+        for (t, o) in out[..m].iter_mut().enumerate() {
+            *o = self.at(i + t);
+        }
+        m
+    }
 }
+
+/// `Src::read`'s chunk for the readers that loop over a view.
+pub const CHUNK: usize = 64;
 
 impl Src for [u16] {
     fn len(&self) -> usize {
@@ -82,6 +97,41 @@ pub fn get(base: *const u8, i: usize) -> u16 {
     let b = i * 10;
     // SAFETY: the caller keeps i inside the buffer (+ 3 bytes of slack).
     (unsafe { core::ptr::read_unaligned(base.add(b >> 3) as *const u32) } >> (b & 7)) as u16 & 0x3FF
+}
+
+/// Packed codes j .. j + out.len() at `base` (no wrap) into `out`
+/// (pointer writes: the indexed ones kept a bounds check each at
+/// opt-level "z"). One copy (region B: inlined twice it cost the room).
+#[inline(never)]
+fn read_run(base: *const u8, mut j: usize, out: &mut [u16]) {
+    let end = j + out.len();
+    let mut o = out.as_mut_ptr();
+    // SAFETY: `o` stays inside `out` (one write per code j .. end); group
+    // g's 5 bytes are in the buffer (+ 3 of slack).
+    unsafe {
+        while j < end && j & 3 != 0 {
+            o.write(get(base, j));
+            o = o.add(1);
+            j += 1;
+        }
+        let mut p = base.add(j / 4 * 5);
+        while j + 4 <= end {
+            let w = core::ptr::read_unaligned(p as *const u32);
+            let h = *p.add(4) as u32;
+            o.write((w & 0x3FF) as u16);
+            o.add(1).write((w >> 10 & 0x3FF) as u16);
+            o.add(2).write((w >> 20 & 0x3FF) as u16);
+            o.add(3).write((w >> 30 | h << 2) as u16);
+            o = o.add(4);
+            p = p.add(5);
+            j += 4;
+        }
+        while j < end {
+            o.write(get(base, j));
+            o = o.add(1);
+            j += 1;
+        }
+    }
 }
 
 /// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`
@@ -225,6 +275,80 @@ impl Codes {
         (o + w.len <= self.len).then_some(o)
     }
 
+    /// The mean code of a .. b, rounded (512 when empty): the scope's
+    /// Hi-res columns.
+    #[inline(never)]
+    /// The mean code of a .. b with its fraction (Hi-res: the trace keeps
+    /// the sub-code steps the averaging gives, owner 2026-11-20).
+    pub fn mean(&self, a: usize, b: usize) -> f32 {
+        let b = b.min(self.len);
+        if a >= b {
+            return 512.0;
+        }
+        let s = if self.packed() {
+            self.scan(a, b).2
+        } else {
+            let mut s = 0u32;
+            for i in a..b {
+                s += self.at(i) as u32;
+            }
+            s
+        };
+        s as f32 / (b - a) as f32
+    }
+
+    /// Codes i .. i + out.len() (to the end) into `out`: how many. Packed:
+    /// a group of 4 at a time, up to the ring's end and on from its start.
+    #[inline(never)]
+    pub fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        let m = out.len().min(self.len.saturating_sub(i));
+        if !self.packed() {
+            for (t, o) in out[..m].iter_mut().enumerate() {
+                *o = self.at(i + t);
+            }
+            return m;
+        }
+        let mut j = self.off + i;
+        if j >= self.cap {
+            j -= self.cap;
+        }
+        let first = (self.cap - j).min(m);
+        read_run(self.base, j, &mut out[..first]);
+        read_run(self.base, 0, &mut out[first..m]);
+        m
+    }
+
+    /// A plain packed ring view (not the coded ring, not CH2).
+    #[inline(always)]
+    fn packed(&self) -> bool {
+        self.cap != 0 && self.cap != CH2_VIEW
+    }
+
+    /// Min, max and sum of codes a .. b (b <= len) of a packed view, read
+    /// in chunks a group of 4 codes at a time (`read`; owner 2026-11-21,
+    /// scope drawing speed: the per-code `at` took 5 ms for the 25 000
+    /// codes of a 200 us/div screen).
+    #[inline(never)]
+    fn scan(&self, a: usize, b: usize) -> (u16, u16, u32) {
+        let (mut lo, mut hi, mut s) = (u16::MAX, 0u16, 0u32);
+        let mut buf = [0u16; CHUNK];
+        let mut i = a;
+        while i < b {
+            let m = self.read(i, &mut buf[..(b - i).min(CHUNK)]);
+            for &v in &buf[..m] {
+                if v < lo {
+                    lo = v;
+                }
+                if v > hi {
+                    hi = v;
+                }
+                s += v as u32;
+            }
+            i += m.max(1);
+        }
+        (lo, hi, s)
+    }
+
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).
     #[inline(never)]
     pub fn min_max(&self, a: usize, b: usize) -> (u16, u16) {
@@ -235,6 +359,10 @@ impl Codes {
             }
             // SAFETY: CODED_MM is set once at start-up.
             return unsafe { (*core::ptr::addr_of!(CODED_MM))(self.off.wrapping_add(a) as u32, b - a) };
+        }
+        if self.packed() {
+            let (lo, hi, _) = self.scan(a, b.min(self.len));
+            return (lo, hi);
         }
         let (mut lo, mut hi) = (u16::MAX, 0u16);
         for i in a..b.min(self.len) {
@@ -254,6 +382,10 @@ impl Src for Codes {
     #[inline(always)]
     fn at(&self, i: usize) -> u16 {
         Codes::at(self, i)
+    }
+    #[inline(always)]
+    fn read(&self, i: usize, out: &mut [u16]) -> usize {
+        Codes::read(self, i, out)
     }
 }
 
@@ -280,5 +412,39 @@ mod tests {
         assert_eq!(c.at(3), get(p, 63));
         assert_eq!(c.at(4), get(p, 0));
         assert_eq!(c.sub(2, 6).at(2), get(p, 0));
+    }
+
+    #[test]
+    fn group_scan_matches_per_code() {
+        // A ring of 1003 codes (not a multiple of 4), views at every
+        // alignment, wrapping or not, against the per-code reads.
+        let cap = 1003;
+        let mut buf = std::vec![0u16; cap + 4];
+        for i in 0..cap {
+            buf[i] = ((i * 7919 + 13) % 1021) as u16;
+        }
+        let p = buf.as_mut_ptr() as *mut u8;
+        pack_in_place(p, cap / 4 * 4);
+        for i in cap / 4 * 4..cap {
+            set(p, i, ((i * 7919 + 13) % 1021) as u16);
+        }
+        for off in [0, 1, 2, 3, 5, 500, 997, 998, 1000, 1002] {
+            for len in [0, 1, 3, 4, 7, 9, 64, 400, 1003] {
+                let c = Codes::new(p, off, len, cap);
+                for (a, b) in [(0, len), (1.min(len), len), (len / 3, len - len / 4)] {
+                    let (mut lo, mut hi, mut s) = (u16::MAX, 0u16, 0u32);
+                    for i in a..b {
+                        let v = get(p, (off + i) % cap);
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                        s += v as u32;
+                    }
+                    assert_eq!(c.min_max(a, b), (lo, hi), "off {off} len {len} {a}..{b}");
+                    if b > a {
+                        assert_eq!(c.mean(a, b), s as f32 / (b - a) as f32, "off {off} len {len} {a}..{b}");
+                    }
+                }
+            }
+        }
     }
 }

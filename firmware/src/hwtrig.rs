@@ -181,6 +181,8 @@ pub struct HwTrig {
     armed: bool,
     post_ticks: u32,
     pub last_cal: Option<CalResult>,
+    /// The frequency counter owns TIM2 (fcnt.rs; `disarm` leaves it alone).
+    pub keep_tim2: bool,
 }
 
 const MAX_MISSES: u8 = 3;
@@ -202,6 +204,7 @@ impl HwTrig {
             armed: false,
             post_ticks: 0,
             last_cal: None,
+            keep_tim2: false,
         }
     }
 
@@ -394,6 +397,11 @@ impl HwTrig {
         }
     }
 
+    /// A preparation is in force (TIM2 is the trigger's until `disarm`).
+    pub fn prepared(&self) -> bool {
+        self.prepared
+    }
+
     /// Post-trigger samples of the current preparation (what `prepare` got).
     pub fn post_ticks(&self) -> u32 {
         self.post_ticks
@@ -403,6 +411,13 @@ impl HwTrig {
     /// free-running (software trigger) configuration. Safe to call any time;
     /// `Scope::halt` must call it so the plain path is never left gated.
     pub fn disarm(&mut self) {
+        self.prepared = false;
+        self.armed = false;
+        if self.keep_tim2 {
+            // The frequency counter owns TIM2 (fcnt.rs): the gate only.
+            unsafe { w32(TIM1_SMCR, 0) };
+            return;
+        }
         unsafe {
             w32(TIM2_SMCR, SMCR_TS_TI1FP1);
             w32(TIM2_CR1, 0);
@@ -411,8 +426,24 @@ impl HwTrig {
             w32(TIM2_SR, 0);
             w32(TIM1_SMCR, 0);
         }
-        self.prepared = false;
-        self.armed = false;
+    }
+
+    /// TIM2 back from the frequency counter (fcnt.rs `stop`): as `init`
+    /// left it, the TIM1 gate open.
+    pub fn idle_tim2(&mut self) {
+        self.keep_tim2 = false;
+        unsafe {
+            w32(TIM2_CR1, 0);
+            w32(TIM2_SMCR, SMCR_TS_TI1FP1);
+            w32(TIM2_CCER, 0);
+            w32(TIM2_CCMR1, CCMR1_FORCED);
+            w32(TIM2_CR2, 5 << 4);
+            w32(TIM2_PSC, 0);
+            w32(TIM2_EGR, 1);
+            w32(TIM2_CNT, 0);
+            w32(TIM2_SR, 0);
+            w32(TIM1_SMCR, 0);
+        }
     }
 
     /// The comparator fired but the software search found no crossing near

@@ -799,14 +799,19 @@ pub const LIVE_CLEAR_MS: u64 = 1000;
 
 /// The probe: OP2 (x1) on PB2, AD2 = OP2O - PB3 at IG 2.0, OSR 256, the
 /// peak hold on AD2 (PKHSEL 00), over a comparator row (`row_for`'s CmpA
-/// rows: DC V 6 V, DC mV, ohm, temperature: OP2 and AD2 unused there). AD1
-/// is off for the probe's time: no reading then (`ad2_with_ad1`).
+/// rows: DC V 6 V, DC mV, ohm, temperature: OP2 and AD2 unused there).
+/// AD1 keeps converting (written last, `ad1_last`), the one row whose shown
+/// AD1 has AD2 next to it (`ad2_with_ad1`): with AD1 off the reading
+/// stopped for as long as a current flowed in A, and with it the alert,
+/// which reaches the app with a reading (owner 2026-11-20, DC V with a
+/// current into A: the readout froze dimmed, the danger alarm came only
+/// when A-JACK beat the probe in). The cost: AD2 moves AD1 by ~80 ppm
+/// (DC V 6 V read 0.32 mV low at +4 V, device 2026-11-01) while a current
+/// flows in A, under a red alert.
 pub fn probe_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
     let mut c = *row;
     ad2_sentinel(&mut c);
     c[18] = R32_OP2_PB2 | (c[18] & 0x0F);
-    // AD1 off while AD2 runs: the row's reading pauses (`ad2_with_ad1`)
-    c[3] &= !0x80;
     c
 }
 
@@ -1002,7 +1007,6 @@ impl Held {
             self.t0 = None;
         }
     }
-    #[inline(never)] // one copy, not one per caller (region B audit #11)
     fn asserted(&self, now: u64, was: bool, assert_ms: u64, clear_ms: u64) -> bool {
         match self.t0 {
             Some(_) if was => now.saturating_sub(self.last) < clear_ms,
@@ -1724,8 +1728,9 @@ impl Sentinel {
         self.decide(now);
     }
 
-    /// V_GATE while the A-PROT probe holds AD1 off (DC mV: no result, so no
-    /// verdict of the row's own): the last verdict stands, dated now. The
+    /// V_GATE while the A-PROT probe runs (DC mV; before 0.4.25 the probe held
+    /// AD1 off: no result, so no verdict of the row's own): the last verdict
+    /// stands, dated now; the row's results still update it. The
     /// probe goes in only after a verdict of the hit run (`dmm.rs`
     /// aprot_poll); without both, A-JACK never came in DC mV once the probe
     /// held AD1 off (device 2026-11-01, 20 mA forward: no alert, no reading).
@@ -2272,14 +2277,16 @@ mod tests {
 
     #[test]
     fn aprot_probe_and_rule() {
-        // The probe: only ENAD1 (off), AD2IG, R26, R27, R29 ENPKH and OP2 (on
-        // PB2) differ from the comparator row; OP1's nibble kept.
+        // The probe: only AD2IG, R26, R27, R29 ENPKH and OP2 (on PB2) differ
+        // from the comparator row; OP1's nibble and ENAD1 kept (AD1 written
+        // last: the reading goes on).
         for (m, r, row) in [(1u8, 0u8, &CFG_F1[0]), (1, 2, &CFG_F1[2]), (3, 0, &CFG_F3[0]), (10, 3, &CFG_F10_P8CLR[3]), (15, 0, &CFG_F15[0])] {
             let (c, _) = row_for(m, r, false, M_ALL, 0, row);
             let p = probe_row(&c);
             let d: Vec<usize> = diff(&c, &p).iter().map(|x| x.0).collect();
             assert!(d.iter().all(|i| [3, 5, 6, 7, 9, 18].contains(i)), "mode {m} r{r}: {d:?}");
-            assert_eq!((p[3], p[18] >> 4), (c[3] & 0x7F, R32_OP2_PB2 >> 4), "AD1 off");
+            assert_eq!((p[3], p[18] >> 4), (c[3], R32_OP2_PB2 >> 4), "AD1 kept");
+            assert_eq!(ad1_last(Kind::CmpA, &p), c[3] & 0x80 != 0, "AD1 last");
             assert_eq!(p[18] & 0x0F, c[18] & 0x0F);
             assert_eq!(p[6], R26_AD2_256);
             assert_eq!(p[9] & 0x07, R29_ENPKH);
@@ -2474,9 +2481,10 @@ mod tests {
     #[test]
     fn no_ad2_next_to_a_shown_ad1() {
         // Every DMM row (the power meter's are its own, powermeter.rs) with the
-        // sentinel overrides and the probe / jack check / negative-leg rows over
-        // them: AD1 never converts next to AD2 / AD3 (`ad2_with_ad1`), except the
-        // AC rows' AD1 peak hold (PeakA / PeakV: AD1 not shown) and stock rows.
+        // sentinel overrides and the jack check / negative-leg rows over them:
+        // AD1 never converts next to AD2 / AD3 (`ad2_with_ad1`), except the AC
+        // rows' AD1 peak hold (PeakA / PeakV: AD1 not shown), stock rows and
+        // the A-PROT probe (`probe_row`: only while a current flows in A).
         let t: [(u8, &[[u8; CFG_LEN]]); 17] = [
             (0, &CFG_F0), (1, &CFG_F1), (2, &CFG_F2), (3, &CFG_F3), (4, &CFG_F4), (5, &CFG_F5_6), (6, &CFG_F5_6),
             (7, &CFG_F7), (8, &CFG_F8_9), (9, &CFG_F8_9), (10, &CFG_F10_P8SET), (10, &CFG_F10_P8CLR),
@@ -2492,9 +2500,7 @@ mod tests {
                     }
                     assert!(!ad2_with_ad1(&c), "mode {m} r{i} acdc {acdc}");
                     assert!(!neg_leg(m, i as u8, acdc, k, 0), "mode {m} r{i}");
-                    for (what, p) in [("probe", probe_row(&c)), ("jack", jack_row(&c))] {
-                        assert!(!ad2_with_ad1(&p), "{what} mode {m} r{i}");
-                    }
+                    assert!(!ad2_with_ad1(&jack_row(&c)), "jack mode {m} r{i}");
                     n += 1;
                 }
             }

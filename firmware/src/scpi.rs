@@ -694,11 +694,6 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///                           (feature dbg-touch, else undefined header)
-///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
-///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
-///                           b y + c, y' = d x + e y + f (touchcal.rs; RESET =
-///                           none, 1,0,0,0,1,0; a set outside the limits is
-///                           "Data out of range")
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///                           (feature dbg-prof, else undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
@@ -724,7 +719,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           total_ms,slices_frozen,blocks_erased, then the
 ///                           idle-time preparation (`prep_stats`): state (0
 ///                           waiting, 1 working, 2 ready, 3 off),
-///                           clusters_ready,erases_since_boot
+///                           clusters_ready,erases_since_boot, then the FAT12
+///                           conversion at boot (fat16conv.rs): 0 not FAT12,
+///                           1 refused, 2 converted, 3 failed
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
 ///                           as a crash (DBG:BOOT? crash word); opendm40 reboots
 ///   DBG:RESET               reboot opendm40 (SW reset)
@@ -741,7 +738,6 @@ pub enum Dbg {
     Ping(u32),
     Input(u8, u16, u16),
     /// x0, y0, x1, y1, ms, hold ms, jitter px.
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
     #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
@@ -750,7 +746,6 @@ pub enum Dbg {
     /// (feature `dbg-touch`).
     #[cfg_attr(not(feature = "dbg-touch"), allow(dead_code))]
     Touch(bool),
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Flash,
     Release,
     Reset,
@@ -775,50 +770,39 @@ pub enum Dbg {
     #[cfg_attr(not(feature = "dbg-hyspi"), allow(dead_code))]
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Isr,
     /// DBG:FAST?: FR-05 FAST's offset refreshes used, rejected, the VOS
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Fast,
     /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Cap,
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
     /// (dmm::set_cap_class; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapClass(Option<u8>),
     /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
     /// the discharge slope (dmm::set_cap_idis; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapIdis(Option<u32>),
     /// DBG:CAP:DISMODE <0..1> / ?: the discharge's mode
     /// (dmm::set_cap_dismode; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapDisMode(Option<u32>),
     /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
     /// (dmm::set_cap_disref; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapDisRef(Option<u32>),
     /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
     /// (dmm::set_cap_dis_ms; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapDisMs(Option<u32>),
     /// DBG:CAP:JUMPN <n> / ?: 600 uF ramp polls before the one-poll step
     /// up (dmm::set_cap_jumpn; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapJumpN(Option<u32>),
     /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
     /// (dmm::set_cap_dis_end; RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     CapDisEnd(Option<u32>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
     /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
     /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     Idle(Option<u32>),
     /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
     /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
@@ -889,22 +873,6 @@ fn n7_arg(a: &[u8]) -> Dbg {
     Dbg::Ad2(6, w[1].min(2) as u8, w[2].clamp(1, 40) as u16, w[0].min(4) as u8)
 }
 
-/// DBG:TOUCH:CAL a,b,c,d,e,f: six numbers into touchcal.rs (false: not
-/// six numbers).
-#[inline(never)] // .cold (link-native.x)
-fn tcal_arg(a: &[u8]) -> bool {
-    let mut v = [0f32; 6];
-    let mut n = 0;
-    for part in a.split(|&b| b == b',') {
-        match parse_num(part) {
-            Some(x) if n < 6 => v[n] = x,
-            _ => return false,
-        }
-        n += 1;
-    }
-    n == 6 && crate::touchcal::scpi_put(&v)
-}
-
 /// LOG:CSV:INTerval / DURation / CHANge [?], LOG:CSV:FREE? (the Record
 /// page's settings): the command, or the error. Values: exactly one of
 /// csvlog::INTERVALS_S (or CHANge) / DURATIONS_S (s) / CHANGES (%); another
@@ -948,6 +916,10 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   SOURce:VOLTage <Vpp>   SOURce:VOLTage:OFFSet <V>|AUTO (FR-28: centre level;
 ///   AUTO = stock 0..Vpp; kept in [Vpp/2, 3 - Vpp/2])
 ///   SOURce:FUNCtion:SQUare:DCYCle <%>   OUTPut ON|OFF
+///   SOURce:AM:STATe ON|OFF   SOURce:FM:STATe ON|OFF (one at a time; ON
+///   switches the other off)   SOURce:AM:DEPTh <%>   SOURce:FM:DEViation <Hz>
+///   SOURce:AM|FM:INTernal:FREQuency <Hz> (one modulation frequency; its
+///   query: the actual one, carrier / K)
 ///   Queries: FREQ? = the actual (clamped + quantised) frequency, DCYC? the
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
@@ -985,6 +957,12 @@ pub enum Cmd {
     GenOffs(Option<f32>),
     GenDuty(Option<f32>),
     GenOut(Option<bool>),
+    /// SOUR:AM:STAT / SOUR:FM:STAT (1 AM, 2 FM = gen::Mod::ALL index).
+    GenModState(u8, Option<bool>),
+    /// SOUR:AM|FM:INT:FREQ, SOUR:AM:DEPT, SOUR:FM:DEV.
+    GenModFreq(Option<f32>),
+    GenAmDepth(Option<f32>),
+    GenFmDev(Option<f32>),
     TimScale(Option<f32>),
     ChScale(Option<f32>),
     ChCoup(Option<bool>),
@@ -998,13 +976,10 @@ pub enum Cmd {
     /// GENerator:DISPlay: the GEN trace on the scope page.
     GenDisp(Option<bool>),
     /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgGenLag(Option<f32>),
     /// DBG:GENTRIG:STAT?: the generator phase readings (gen::stats).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgGenStat,
     /// DBG:CH2:LAG <us>: the DMM CH2's conversion lag (scope_ch2).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgCh2Lag(Option<f32>),
     Run,
     Stop,
@@ -1059,22 +1034,12 @@ pub enum Cmd {
     CalcSmoState(Option<bool>),
     CalcSmoResp(Option<u8>),
     /// DBG:PINCH 0|1|2 / ?: scope pinch mode (scope_page::set_pinch_mode).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgPinch(Option<u8>),
     /// DBG:GEST?: log of the last scope drags.
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgGest,
     /// DBG:VIEW?: the page shown (App::scpi).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgView,
-    /// DBG:TOUCH:TEST ON|OFF (Some) / ? (None): the touch test page
-    /// (app_touchtest.rs).
-    DbgTouchTest(Option<bool>),
-    /// DBG:TOUCH:CAL? (0) / RESET (1) / a,b,c,d,e,f (2, the values in
-    /// touchcal.rs `scpi_take`): the touch calibration (app_touchtest.rs).
-    DbgTouchCal(u8),
     /// DBG:READout?: the DMM readout as drawn (App::scpi).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
@@ -1097,17 +1062,14 @@ pub enum Cmd {
     /// SYSTem:BEEPer:VOLume <0..100> / ?: the key / alert volume (%).
     SysBeepVol(Option<u8>),
     /// DBG:ALARm?: the danger alarm's state.
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgAlarm,
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
     #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgSentLog,
     /// DBG:SENTinel:VARiant <0..255> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
     #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
@@ -1118,10 +1080,8 @@ pub enum Cmd {
     DbgSrc(Option<crate::dbgsrc::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgSentPrec(Option<u16>),
     /// DBG:HWTRIG...: 0 query, 1 ENABLE (bool), 2 CAL?, 3 STAT?, 4 STAT:RESET.
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
     Pow(Pow),
@@ -1190,6 +1150,8 @@ pub fn range_si(mode: u8, r: i8) -> Option<f32> {
         0 | 1 => 6.0 * p,
         2 | 3 => [0.06, 0.6][r.min(1)],
         4..=9 => [[6.0, 10.0], [0.06, 0.6], [6e-4, 6e-3]][((mode - 4) % 3) as usize][r.min(1)],
+        // Ohm r8: the nS range (dmm::OHMNS), 60 nS.
+        10 if r == 8 => 60e-9,
         10 => 60.0 * p,
         13 => 6e-9 * p,
         14 => 60.0 * p,
@@ -1409,15 +1371,10 @@ pub enum Pow {
     /// :VOLTage:CALibrate DEFault (1: the factory-derived gain again),
     /// :VOLTage:CALibrate? (2). :VOLTage:GAIN? (3): the 4 gains in force.
     VCal(u8),
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgRow,
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgPoke(u8, u8),
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgStat(u8),
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgRaw,
-    #[cfg_attr(not(feature = "dbg-dev"), allow(dead_code))]
     DbgDisc(Option<u8>),
 }
 
@@ -1496,11 +1453,6 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     let l0 = rest.first().copied().unwrap_or(b"");
     let l1 = rest.get(1).copied();
     let state = |q: bool| if q { Ok(None) } else { on_off(a).map(Some).ok_or(BAD) };
-    #[cfg(not(feature = "dbg-dev"))]
-    if dbg {
-        return Err(HDR);
-    }
-    #[cfg(feature = "dbg-dev")]
     if dbg {
         return match l0 {
             b"ROW" if query => Ok(Pow::DbgRow),
@@ -1638,6 +1590,39 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     Err(HDR)
 }
 
+/// SOUR:AM|FM:STATe / :DEPTh (AM) / :DEViation (FM) / :INTernal:FREQuency
+/// (the generator's modulation, gen::Mod), for `gen_scope_cmd`.
+#[inline(never)] // .cold (link-native.x): rarely sent
+fn gen_mod_cmd(parts: &[&[u8]], a: &[u8], query: bool) -> Result<Cmd, &'static str> {
+    let am = kw(parts[1], "AM");
+    let p2 = parts.get(2).copied().unwrap_or(&[]);
+    let num = |unit: &[u8], ok: fn(f32) -> bool| -> Result<Option<f32>, &'static str> {
+        if query {
+            return Ok(None);
+        }
+        match parse_num_u(a, unit) {
+            Some(v) if ok(v) => Ok(Some(v)),
+            Some(_) => Err(RANGE),
+            None => Err(BAD),
+        }
+    };
+    if kw(p2, "STATe") {
+        match (query, on_off(a)) {
+            (true, _) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, None)),
+            (false, Some(b)) => Ok(Cmd::GenModState(if am { 1 } else { 2 }, Some(b))),
+            _ => Err(BAD),
+        }
+    } else if am && kw(p2, "DEPTh") {
+        Ok(Cmd::GenAmDepth(num(b"PCT", |v| (0.0..=100.0).contains(&v))?))
+    } else if !am && kw(p2, "DEViation") {
+        Ok(Cmd::GenFmDev(num(b"HZ", |v| v >= 0.0)?))
+    } else if kw(p2, "INTernal") && parts.len() >= 4 && kw(parts[3], "FREQuency") {
+        Ok(Cmd::GenModFreq(num(b"HZ", |v| v > 0.0)?))
+    } else {
+        Err("Undefined header")
+    }
+}
+
 /// SOURce / OUTPut / TIMebase / CHANnel1 / TRIGger (generator and scope).
 /// A query gives the query Cmd (None inside); a set gives Some(value) or an
 /// error (BAD: no such value, RANGE: outside the setting's domain); the
@@ -1674,6 +1659,9 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
             (false, Some(b)) => Ok(Cmd::GenOut(Some(b))),
             _ => Err(BAD),
         };
+    }
+    if kw(p0, "SOURce") && (kw(sub, "AM") || kw(sub, "FM")) {
+        return gen_mod_cmd(parts, a, query);
     }
     if kw(p0, "SOURce") {
         return if kw(sub, "FUNCtion") && parts.len() >= 4 {
@@ -2253,7 +2241,6 @@ impl Scpi {
                         }
                     });
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "ALARm") => out = Out::Instr(Cmd::DbgAlarm),
                 _ if kw(p0, "SYSTem") && parts.len() > 1 && kw(parts[1], "ALERt") => {
                     let a = trim(arg);
@@ -2389,34 +2376,11 @@ impl Scpi {
                 }
                 // Scope gesture aids (App::scpi): DBG:PINCH, DBG:GEST? (last
                 // drags).
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"PINCH"[..]) => {
                     out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
-                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"TOUCH" && kw(parts[2], "CAL") => {
-                    let a = trim(arg);
-                    if query {
-                        out = Out::Instr(Cmd::DbgTouchCal(0));
-                    } else if kw(a, "RESet") {
-                        out = Out::Instr(Cmd::DbgTouchCal(1));
-                    } else if tcal_arg(a) {
-                        out = Out::Instr(Cmd::DbgTouchCal(2));
-                    } else {
-                        self.err_arg(no_arg, BAD);
-                    }
-                }
-                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"TOUCH" && kw(parts[2], "TEST") => {
-                    match (query, on_off(trim(arg))) {
-                        (true, _) => out = Out::Instr(Cmd::DbgTouchTest(None)),
-                        (false, Some(on)) => out = Out::Instr(Cmd::DbgTouchTest(Some(on))),
-                        _ => self.err_arg(no_arg, BAD),
-                    }
-                }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "READout") => out = Out::Instr(Cmd::DbgReadout),
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]
@@ -2481,7 +2445,6 @@ impl Scpi {
                 _ if cfg!(feature = "dbg-acdc") && p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => {
                     out = Out::Instr(Cmd::DbgAcdc)
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
@@ -2489,7 +2452,6 @@ impl Scpi {
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
@@ -2504,7 +2466,6 @@ impl Scpi {
                         }
                     }
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "PRECond")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentPrec(None)),
@@ -2515,7 +2476,6 @@ impl Scpi {
                 // DBG:SENTinel? / :REG? only with the feature `dbg-sent`.
                 #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgCh2Lag(None)),
@@ -2523,11 +2483,9 @@ impl Scpi {
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"STAT"[..]) => {
                     out = Out::Instr(Cmd::DbgGenStat)
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgGenLag(None)),
@@ -2535,7 +2493,6 @@ impl Scpi {
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
-                #[cfg(feature = "dbg-dev")]
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),
@@ -2627,7 +2584,6 @@ impl Scpi {
                             }
                             _ => Dbg::Input(1, 0, 0),
                         },
-                        #[cfg(feature = "dbg-dev")]
                         b"DRAG" => {
                             let v = nums::<7>(a);
                             let ms = if v[4] == 0 { 300 } else { v[4].min(10_000) };
@@ -2665,7 +2621,6 @@ impl Scpi {
                         }
                         // DBG:CHG? / DBG:CHG:PIN n,<mode> / DBG:CHG:OUT <mode> (PB10):
                         // the charger status pins (power.rs dbg_state / dbg_pin).
-                        #[cfg(feature = "dbg-dev")]
                         b"CHG" => {
                             self.len = 0;
                             let op = parts.get(2).copied().unwrap_or(b"");
@@ -2700,7 +2655,6 @@ impl Scpi {
                             }
                             continue;
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
                         #[cfg(feature = "dbg-ohm6")]
                         b"OHM6" => Dbg::Ohm6((!query).then(|| {
@@ -2712,41 +2666,30 @@ impl Scpi {
                         })),
                         #[cfg(feature = "dbg-prof")]
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
-                        #[cfg(feature = "dbg-dev")]
                         b"FLASH" => Dbg::Flash,
-                        #[cfg(feature = "dbg-dev")]
                         b"ISR" => Dbg::Isr,
-                        #[cfg(feature = "dbg-dev")]
                         b"FAST" if query => Dbg::Fast,
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
                             Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "JUMPN")) => {
                             Dbg::CapJumpN(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
                             Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMODE")) => {
                             Dbg::CapDisMode(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISREF")) => {
                             Dbg::CapDisRef(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
                             Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
                             Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })
                         }
-                        #[cfg(feature = "dbg-dev")]
                         b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
@@ -2762,7 +2705,7 @@ impl Scpi {
                         // the press feedback's sync (scanline.rs `query`);
                         // DBG:SCANLINE:DIR 0..3 = the screen axis of the scan,
                         // DBG:SCANLINE:SYNC 0|1 = the wait before a pressed box.
-                        #[cfg(all(target_os = "none", feature = "dbg-dev"))]
+                        #[cfg(target_os = "none")]
                         b"SCANLINE" => {
                             self.len = 0;
                             let op = parts.get(2).copied().unwrap_or(b"");
@@ -2778,7 +2721,7 @@ impl Scpi {
                             }
                             continue;
                         }
-                        #[cfg(all(target_os = "none", feature = "dbg-dev"))]
+                        #[cfg(target_os = "none")]
                         b"TE" if query => {
                             self.len = 0;
                             for (k, (n, o)) in crate::lcd::te_probe().iter().enumerate() {
@@ -2810,7 +2753,7 @@ impl Scpi {
                         // deleted>,<firmware files committed>,<rejected>,<root
                         // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
-                        #[cfg(all(feature = "vdisk", feature = "dbg-dev"))]
+                        #[cfg(feature = "vdisk")]
                         b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), crate::dlog::CSV_OPENS.load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
                         b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
                         b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
